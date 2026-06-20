@@ -1,0 +1,17 @@
+{
+  "confirmDangerousCommands": true,
+  "dangerousPatterns": [
+    "rm -rf",
+    "mkfs",
+    "dd if=",
+    ": > ",
+    "chmod -R 777",
+    "userdel",
+    "passwd",
+    "apt purge",
+    "systemctl stop",
+    "iptables -F"
+  ],
+  "passwordTimeout": 15,
+  "autoCache": true
+}
