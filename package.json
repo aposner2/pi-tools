@@ -19,7 +19,8 @@
   "pi": {
     "extensions": [
       "./extensions/chat/index.ts",
-      "./extensions/sudoer/index.ts"
+      "./extensions/sudoer/index.ts",
+      "./extensions/large-write/index.ts"
     ],
     "skills": [
       "./skills"
