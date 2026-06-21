@@ -10,8 +10,21 @@ interface RemotePeer {
 }
 
 const connections = new Map<string, RemotePeer>();
+let configRef: ChatConfig | null = null;
 
-export function connectToPeer(
+export function setClientConfig(cfg: ChatConfig): void {
+  configRef = cfg;
+}
+
+/**
+ * Try to connect to an existing chat server.  Returns true if a server was
+ * found and we connected successfully.
+ */
+export async function tryConnectToExisting(config: ChatConfig): Promise<boolean> {
+  return connectToPeer("127.0.0.1", config.port, config);
+}
+
+async function connectToPeer(
   host: string,
   port: number,
   config: ChatConfig
@@ -19,7 +32,7 @@ export function connectToPeer(
   const key = `${host}:${port}`;
   if (connections.has(key)) {
     const existing = connections.get(key)!;
-    if (existing.connected) return Promise.resolve(true);
+    if (existing.connected) return true;
     existing.ws.close();
   }
 
@@ -30,6 +43,7 @@ export function connectToPeer(
       ws.on("open", () => {
         const entry: RemotePeer = { host, port, ws, connected: true };
         connections.set(key, entry);
+
         ws.on("message", (data) => {
           try {
             const msg = JSON.parse(data.toString()) as ChatMessage;
@@ -40,9 +54,11 @@ export function connectToPeer(
             );
           } catch { /* ignore */ }
         });
+
         ws.on("close", () => {
           entry.connected = false;
         });
+
         resolve(true);
       });
 
@@ -60,19 +76,14 @@ export function sendToPeer(host: string, port: number, msg: ChatMessage): boolea
   try {
     peer.ws.send(JSON.stringify(msg));
     appendHistory(
-      configPath(),
+      configRef?.historyPath || "",
       { from: msg.from, text: msg.text, timestamp: msg.timestamp, direction: "outbound" },
-      500
+      configRef?.maxHistory || 500
     );
     return true;
   } catch {
     return false;
   }
-}
-
-function configPath(): string {
-  // fallback; will be overridden by index.ts
-  return "";
 }
 
 export function disconnectAll(): void {

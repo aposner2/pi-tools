@@ -5,7 +5,6 @@ import type { ChatConfig, ChatMessage, Peer } from "./types";
 import { appendHistory } from "./history";
 
 const HEARTBEAT_MS = 30_000;
-const MAX_MSG_LEN = 4000;
 
 let wss: WebSocketServer | null = null;
 let peers = new Map<string, Peer>();
@@ -41,10 +40,7 @@ export function startServer(
     return false;
   }
 
-  ctx.ui.notify(`pi-chat: listening on :${config.port}`, "info");
-
-  // Expose config for tools/panel
-  configRef = config;
+  ctx.ui.notify(`pi-chat: server listening on :${config.port}`, "info");
 
   wss.on("connection", handleConnection);
 

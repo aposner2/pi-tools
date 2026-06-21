@@ -3,12 +3,18 @@ import { hostname } from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChatConfig, ChatMessage } from "./types";
 import { getPeers, broadcast } from "./server";
+import { sendToPeer } from "./client";
 import { loadHistory } from "./history";
 
 let configRef: ChatConfig | null = null;
+let isServerRef: boolean = true;
 
 export function setConfig(cfg: ChatConfig): void {
   configRef = cfg;
+}
+
+export function setIsServer(val: boolean): void {
+  isServerRef = val;
 }
 
 export function registerTools(pi: ExtensionAPI): void {
@@ -36,7 +42,13 @@ export function registerTools(pi: ExtensionAPI): void {
         text: params.message,
         timestamp: Date.now(),
       };
-      broadcast(JSON.stringify(msg));
+
+      if (isServerRef) {
+        broadcast(JSON.stringify(msg));
+      } else {
+        sendToPeer("127.0.0.1", configRef!.port, msg);
+      }
+
       return {
         content: [{
           type: "text",
