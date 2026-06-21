@@ -5,6 +5,22 @@ const SERVICE_TYPE = "pi-chat";
 
 let bonjour: Bonjour | null = null;
 
+// Discovered peers list for the chat panel
+const discoveredPeers = new Set<string>();
+const peerListeners = new Set<(peers: Set<string>) => void>();
+
+export function getDiscoveredPeers(): Set<string> {
+  return discoveredPeers;
+}
+
+export function onPeerDiscovered(callback: (peers: Set<string>) => void): void {
+  peerListeners.add(callback);
+}
+
+function notifyPeerChange(): void {
+  peerListeners.forEach((cb) => cb(new Set(discoveredPeers)));
+}
+
 export function startDiscovery(config: ChatConfig): void {
   if (bonjour) return;
   bonjour = new Bonjour();
@@ -20,7 +36,9 @@ export function startDiscovery(config: ChatConfig): void {
 
   // Browse for peer services
   bonjour.find({ type: SERVICE_TYPE }, (service) => {
-    console.log(`[pi-chat] discovered peer: ${service.name} at ${service.host}:${service.port}`);
+    const label = `${service.name} @ ${service.host}:${service.port}`;
+    discoveredPeers.add(label);
+    notifyPeerChange();
   });
 }
 

@@ -13,6 +13,7 @@ import {
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { HistoryEntry, ChatConfig } from "./types";
 import { loadHistory } from "./history";
+import { getDiscoveredPeers } from "./discovery";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -233,6 +234,7 @@ class ChatPanel extends Container implements Focusable {
   private input: Input;
   private peerCount: number;
   private ctx: ExtensionContext | null;
+  private discoveredPeers: Set<string>;
 
   private _focused: boolean = false;
   get focused(): boolean { return this._focused; }
@@ -253,6 +255,7 @@ class ChatPanel extends Container implements Focusable {
     this.callbacks = callbacks;
     this.ctx = ctx;
     this.peerCount = 0;
+    this.discoveredPeers = getDiscoveredPeers();
 
     // Load history
     const history = loadHistory(config.historyPath, config.maxHistory);
@@ -294,6 +297,15 @@ class ChatPanel extends Container implements Focusable {
     const headerText = `${statusDot} Chat — ${this.peerCount} peer(s) • ${this.config.agentId}`;
     this.addChild(new Text(this.theme.header(headerText), 0, 0));
 
+    // Discovered peers list
+    const peerList = Array.from(this.discoveredPeers);
+    if (peerList.length > 0) {
+      this.addChild(new Text(this.theme.muted(`  Peers:`), 0, 0));
+      for (const peer of peerList) {
+        this.addChild(new Text(this.theme.accent(`  • ${peer}`), 0, 0));
+      }
+    }
+
     // Separator
     this.addChild(new Text(this.theme.border("─".repeat(80)), 0, 0));
 
@@ -309,6 +321,7 @@ class ChatPanel extends Container implements Focusable {
 
   setPeerCount(count: number): void {
     this.peerCount = count;
+    this.discoveredPeers = getDiscoveredPeers();
     this.invalidate();
   }
 

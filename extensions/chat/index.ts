@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { TUI } from "@earendil-works/pi-tui";
 import { loadConfig } from "./config";
 import { startServer, stopServer, getPeers, onMessage, broadcast } from "./server";
-import { startDiscovery, stopDiscovery } from "./discovery";
+import { startDiscovery, stopDiscovery, onPeerDiscovered, getDiscoveredPeers } from "./discovery";
 import { disconnectAll, tryConnectToExisting, setClientConfig } from "./client";
 import { registerTools, setConfig, setIsServer } from "./tools";
 import { appendHistory } from "./history";
@@ -40,6 +40,13 @@ export default function (pi: ExtensionAPI) {
 
     startDiscovery(config);
 
+    // Subscribe to peer discovery changes for chat panel updates
+    onPeerDiscovered(() => {
+      if (panelHandle && tuiRef) {
+        tuiRef.requestRender();
+      }
+    });
+
     // Subscribe to incoming messages for chat panel updates
     onMessage((msg) => {
       if (panelHandle && tuiRef) {
@@ -64,10 +71,10 @@ export default function (pi: ExtensionAPI) {
     disconnectAll();
   });
 
-  // Register shortcut to toggle chat panel
-  pi.registerCommand("chat_toggle", {
-    description: "Toggle A2A chat panel (Ctrl+Shift+C)",
-    handler: async (_args, ctx) => {
+  // Register shortcut to toggle chat panel (Ctrl+1)
+  pi.registerShortcut("ctrl+1", {
+    description: "Toggle A2A chat panel",
+    handler: async (ctx) => {
       await toggleChatPanel(ctx);
     },
   });
