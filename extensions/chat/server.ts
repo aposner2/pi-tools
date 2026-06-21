@@ -13,6 +13,17 @@ let piRef: ExtensionAPI | null = null;
 let ctxRef: ExtensionContext | null = null;
 let configRef: ChatConfig | null = null;
 
+// Message event hooks for external subscribers (e.g., chat panel)
+const messageListeners = new Set<(msg: ChatMessage) => void>();
+
+export function onMessage(callback: (msg: ChatMessage) => void): void {
+  messageListeners.add(callback);
+}
+
+export function notifyMessage(msg: ChatMessage): void {
+  messageListeners.forEach((cb) => cb(msg));
+}
+
 export function startServer(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -31,6 +42,9 @@ export function startServer(
   }
 
   ctx.ui.notify(`pi-chat: listening on :${config.port}`, "info");
+
+  // Expose config for tools/panel
+  configRef = config;
 
   wss.on("connection", handleConnection);
 
@@ -64,6 +78,8 @@ function handleConnection(ws: WebSocket, req: { socket?: { remoteAddress?: strin
         { from: msg.from, text: msg.text, timestamp: msg.timestamp, direction: "inbound" },
         configRef?.maxHistory || 500
       );
+      // Notify chat panel of new message
+      notifyMessage(msg);
       const prefix = msg.from ? `[chat from ${msg.from}]` : "[chat]";
       piRef?.sendUserMessage(`${prefix} ${msg.text}`, { deliverAs: "followUp" });
     } catch {

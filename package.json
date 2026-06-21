@@ -28,5 +28,9 @@
     "prompts": [
       "./prompts"
     ]
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.3"
   }
 }

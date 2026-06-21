@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import { hostname } from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChatConfig, ChatMessage } from "./types";
-import { getPeers, getServer, broadcast } from "./server";
+import { getPeers, broadcast } from "./server";
 import { loadHistory } from "./history";
 
 let configRef: ChatConfig | null = null;
@@ -22,11 +22,12 @@ export function registerTools(pi: ExtensionAPI): void {
         description: "The message to send (keep under 4000 chars)",
       }),
     }),
-    async execute(_id, params) {
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
       const peers = getPeers();
       if (peers.size === 0) {
         return {
           content: [{ type: "text", text: "No peers connected." }],
+          details: {},
         };
       }
       const msg: ChatMessage = {
@@ -41,6 +42,7 @@ export function registerTools(pi: ExtensionAPI): void {
           type: "text",
           text: `Sent to ${peers.size} peer(s): "${truncate(params.message, 80)}"`,
         }],
+        details: {},
       };
     },
   });
@@ -59,6 +61,7 @@ export function registerTools(pi: ExtensionAPI): void {
             type: "text",
             text: `No peers connected.\nAgent: ${configRef?.agentId}\nPort: ${configRef?.port}`,
           }],
+          details: {},
         };
       }
       const list = Array.from(peers.values())
@@ -66,6 +69,7 @@ export function registerTools(pi: ExtensionAPI): void {
         .join("\n");
       return {
         content: [{ type: "text", text: `Connected peers:\n${list}` }],
+        details: {},
       };
     },
   });
@@ -80,12 +84,12 @@ export function registerTools(pi: ExtensionAPI): void {
         Type.Number({ description: "Number of messages to show", default: 20 })
       ),
     }),
-    async execute(_id, params) {
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
       const path = configRef?.historyPath || "";
       const limit = params.limit || 20;
       const entries = loadHistory(path, limit);
       if (entries.length === 0) {
-        return { content: [{ type: "text", text: "No chat history." }] };
+        return { content: [{ type: "text", text: "No chat history." }], details: {} };
       }
       const lines = entries.map((e) => {
         const dir = e.direction === "inbound" ? "◀" : "▶";
@@ -94,6 +98,7 @@ export function registerTools(pi: ExtensionAPI): void {
       });
       return {
         content: [{ type: "text", text: `Recent messages:\n${lines.join("\n")}` }],
+        details: {},
       };
     },
   });
