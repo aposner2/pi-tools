@@ -20,7 +20,8 @@
     "extensions": [
       "./extensions/chat/index.ts",
       "./extensions/sudoer/index.ts",
-      "./extensions/large-write/index.ts"
+      "./extensions/large-write/index.ts",
+      "./extensions/hostname-badge/index.ts"
     ],
     "skills": [
       "./skills"
