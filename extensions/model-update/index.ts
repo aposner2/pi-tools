@@ -355,7 +355,7 @@ async function showModelConfig(
       ));
       container.addChild(new Spacer(1));
       container.addChild(new Text(
-        theme.fg("warning", "A compaction will be triggered to recalculate context usage before the new size takes effect."),
+        theme.fg("warning", "A reload will be triggered so Pi picks up the new size. If the current conversation exceeds the new limit, compaction will occur automatically."),
         1,
         0,
       ));
@@ -385,12 +385,9 @@ async function showModelConfig(
   saveModelsJson(data);
   ctx.ui.notify(`Saved config for ${model.id}`, "info");
 
-  // Trigger compaction if context window was changed and confirmed
+  // Reload so Pi picks up the new context window and recalculates thresholds
   if (contextWindowChanged) {
-    ctx.compact({
-      onComplete: () => ctx.ui.notify("Compaction complete — new context window active", "info"),
-      onError: (err) => ctx.ui.notify(`Compaction failed: ${err.message ?? err}`, "error"),
-    });
+    await ctx.reload();
   }
 }
 
