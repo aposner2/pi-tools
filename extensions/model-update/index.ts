@@ -256,8 +256,9 @@ async function showModelConfig(
   provider: ProviderConfig,
   model: ModelEntry,
 ): Promise<void> {
-  // Track original context window to detect changes
+  // Track original values for change detection
   const originalContextWindow = model.contextWindow;
+  let contextWindowChanged = false;
 
   const settingsItems: SettingItem[] = [
     {
@@ -275,13 +276,13 @@ async function showModelConfig(
     {
       id: "contextWindow",
       label: `Context window (tokens)`,
-      currentValue: String(model.contextWindow ?? 128000),
+      currentValue: model.contextWindow === undefined ? "auto" : String(model.contextWindow),
       values: ["auto", "32768", "65536", "131072", "262144", "524288"],
     },
     {
       id: "maxTokens",
       label: `Max output tokens`,
-      currentValue: String(model.maxTokens ?? 16384),
+      currentValue: model.maxTokens === undefined ? "auto" : String(model.maxTokens),
       values: ["auto", "8192", "16384", "32768", "65536", "81920"],
     },
   ];
@@ -310,11 +311,11 @@ async function showModelConfig(
             }
             break;
           case "contextWindow":
-            if (newValue === "auto") {
-              delete model.contextWindow;
-            } else {
-              model.contextWindow = parseInt(newValue);
+            const newCw = newValue === "auto" ? undefined : parseInt(newValue);
+            if (newCw !== originalContextWindow) {
+              contextWindowChanged = true;
             }
+            model.contextWindow = newCw;
             break;
           case "maxTokens":
             if (newValue === "auto") {
@@ -341,9 +342,6 @@ async function showModelConfig(
   });
 
   // Check if context window was changed and prompt for confirmation
-  const newContextWindow = model.contextWindow;
-  const contextWindowChanged = originalContextWindow !== newContextWindow;
-
   if (contextWindowChanged) {
     const confirmed = await ctx.ui.custom<boolean>((tui, theme, _kb, done) => {
       const container = new Container();
