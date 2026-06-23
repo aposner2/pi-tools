@@ -256,6 +256,9 @@ async function showModelConfig(
   provider: ProviderConfig,
   model: ModelEntry,
 ): Promise<void> {
+  // Track original context window to detect changes
+  const originalContextWindow = model.contextWindow;
+
   const settingsItems: SettingItem[] = [
     {
       id: "reasoning",
@@ -337,9 +340,60 @@ async function showModelConfig(
     };
   });
 
-  // Save after closing the UI
+  // Check if context window was changed and prompt for confirmation
+  const newContextWindow = model.contextWindow;
+  const contextWindowChanged = originalContextWindow !== newContextWindow;
+
+  if (contextWindowChanged) {
+    const confirmed = await ctx.ui.custom<boolean>((tui, theme, _kb, done) => {
+      const container = new Container();
+      container.addChild(new DynamicBorder((s: string) => theme.fg("warning", s)));
+      container.addChild(new Text(theme.fg("accent", theme.bold("Context Window Changed")), 1, 0));
+      container.addChild(new Spacer(1));
+      container.addChild(new Text(
+        theme.fg("text", "Changing the context window mid-session may disrupt TUI token calculations and auto-compaction thresholds."),
+        1,
+        0,
+      ));
+      container.addChild(new Spacer(1));
+      container.addChild(new Text(
+        theme.fg("warning", "A compaction will be triggered to recalculate context usage before the new size takes effect."),
+        1,
+        0,
+      ));
+      container.addChild(new Spacer(1));
+      container.addChild(new Text(theme.fg("dim", "Continue? [y/n]"), 1, 0));
+      container.addChild(new DynamicBorder((s: string) => theme.fg("warning", s)));
+
+      return {
+        render: (w) => container.render(w),
+        invalidate: () => {},
+        handleInput: (d) => {
+          if (d === "y" || d === "Y") done(true);
+          else if (d === "n" || d === "N") done(false);
+        },
+      };
+    });
+
+    if (!confirmed) {
+      // Revert context window change
+      model.contextWindow = originalContextWindow;
+      ctx.ui.notify("Context window change cancelled", "info");
+      return; // Don't save
+    }
+  }
+
+  // Save after closing the UI (or after confirmation)
   saveModelsJson(data);
   ctx.ui.notify(`Saved config for ${model.id}`, "info");
+
+  // Trigger compaction if context window was changed and confirmed
+  if (contextWindowChanged) {
+    ctx.compact({
+      onComplete: () => ctx.ui.notify("Compaction complete — new context window active", "info"),
+      onError: (err) => ctx.ui.notify(`Compaction failed: ${err.message ?? err}`, "error"),
+    });
+  }
 }
 
 // ─── Main Extension ──────────────────────────────────────────────────────────
