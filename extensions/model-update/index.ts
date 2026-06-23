@@ -176,7 +176,10 @@ async function runModelUpdate(ctx: Parameters<ExtensionAPI["registerCommand"]>[1
 
 // ─── /model-config command ────────────────────────────────────────────────────
 
-async function runModelConfig(ctx: Parameters<ExtensionAPI["registerCommand"]>[1]["handler"] extends (args: any, ctx: infer C) => any ? C : never): Promise<void> {
+async function runModelConfig(
+  pi: ExtensionAPI,
+  ctx: Parameters<ExtensionAPI["registerCommand"]>[1]["handler"] extends (args: any, ctx: infer C) => any ? C : never,
+): Promise<void> {
   const data = loadModelsJson();
   if (!data) {
     ctx.ui.notify("No models.json found", "error");
@@ -238,7 +241,7 @@ async function runModelConfig(ctx: Parameters<ExtensionAPI["registerCommand"]>[1
   if (!model) return;
 
   // Step 2: Show configuration options
-  await showModelConfig(ctx, data, providerName, provider, model);
+  await showModelConfig(pi, ctx, data, providerName, provider, model);
 }
 
 function buildModelSummary(m: ModelEntry): string {
@@ -250,6 +253,7 @@ function buildModelSummary(m: ModelEntry): string {
 }
 
 async function showModelConfig(
+  pi: ExtensionAPI,
   ctx: Parameters<ExtensionAPI["registerCommand"]>[1]["handler"] extends (args: any, ctx: infer C) => any ? C : never,
   data: ModelsJson,
   providerName: string,
@@ -355,7 +359,7 @@ async function showModelConfig(
       ));
       container.addChild(new Spacer(1));
       container.addChild(new Text(
-        theme.fg("warning", "A reload will be triggered so Pi picks up the new size. If the current conversation exceeds the new limit, compaction will occur automatically."),
+        theme.fg("warning", "A compaction will be triggered to recalculate context usage before the new size takes effect."),
         1,
         0,
       ));
@@ -381,13 +385,19 @@ async function showModelConfig(
     }
   }
 
-  // Save after closing the UI (or after confirmation)
+  // Save to disk
   saveModelsJson(data);
+
+  // Apply immediately mid-session via registerProvider (takes effect without reload)
+  pi.registerProvider(providerName, provider);
   ctx.ui.notify(`Saved config for ${model.id}`, "info");
 
-  // Reload so Pi picks up the new context window and recalculates thresholds
+  // Trigger compaction if context window was changed and confirmed
   if (contextWindowChanged) {
-    await ctx.reload();
+    ctx.compact({
+      onComplete: () => ctx.ui.notify("Compaction complete — new context window active", "info"),
+      onError: (err) => ctx.ui.notify(`Compaction failed: ${err.message ?? err}`, "error"),
+    });
   }
 }
 
@@ -404,7 +414,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("model-config", {
     description: "Configure per-model settings (reasoning, context window, etc.)",
     handler: async (_args, ctx) => {
-      await runModelConfig(ctx);
+      await runModelConfig(pi, ctx);
     },
   });
 }
