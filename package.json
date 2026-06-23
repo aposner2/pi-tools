@@ -1,16 +1,13 @@
 {
   "name": "pi-tools",
   "version": "0.1.0",
-  "description": "Consolidated pi tools: chat, sudoer, skills, and prompts",
+  "description": "Consolidated pi tools: sudoer, large-write, hostname-badge, skills, and prompts",
   "keywords": [
     "pi-package"
   ],
   "license": "MIT",
   "private": false,
-  "dependencies": {
-    "bonjour-service": "^1.4.1",
-    "ws": "^8.18.0"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
@@ -18,7 +15,6 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/chat/index.ts",
       "./extensions/sudoer/index.ts",
       "./extensions/large-write/index.ts",
       "./extensions/hostname-badge/index.ts"
@@ -31,7 +27,6 @@
     ]
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1",
     "typescript": "^6.0.3"
   }
 }
