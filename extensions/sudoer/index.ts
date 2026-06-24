@@ -31,6 +31,7 @@ interface SudoerConfig {
   dangerousPatterns: string[];
   passwordTimeout: number;
   autoCache: boolean;
+  maxPasswordAttempts: number;
 }
 
 const DEFAULT_CONFIG: SudoerConfig = {
@@ -49,6 +50,7 @@ const DEFAULT_CONFIG: SudoerConfig = {
   ],
   passwordTimeout: 15,
   autoCache: true,
+  maxPasswordAttempts: 3,
 };
 
 function loadConfig(cwd: string): SudoerConfig {
@@ -101,6 +103,51 @@ function isSudoAuthFailure(output: string): boolean {
     lower.includes("not in the sudoers file") ||
     lower.includes("authentication failure")
   );
+}
+
+// ─── Password Verification ──────────────────────────────────────────────────
+
+function verifyPassword(password: string): boolean {
+  try {
+    const escaped = password.replace(/'/g, "'\\''");
+    const testCmd = `echo '${escaped}' | sudo -S -k echo "ok" 2>&1`;
+    const result = fs.execSync(testCmd, { encoding: "utf-8", timeout: 10000 });
+    return result.trim() === "ok";
+  } catch {
+    return false;
+  }
+}
+
+// ─── Prompt + Verify (up to maxPasswordAttempts) ─────────────────────────────
+
+async function promptAndVerify(
+  ctx: ExtensionContext,
+  config: SudoerConfig,
+): Promise<string | null> {
+  const maxAttempts = config.maxPasswordAttempts;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const password = await promptPassword(ctx);
+    if (!password) return null; // user cancelled
+
+    if (verifyPassword(password)) {
+      cachedPassword = password;
+      passwordTimestamp = Date.now();
+      ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("success", "sudoer authenticated"));
+      return password;
+    }
+
+    const remaining = maxAttempts - attempt;
+    if (remaining > 0) {
+      ctx.ui.notify(`Password incorrect — ${remaining} attempt(s) remaining`, "warning");
+    }
+  }
+
+  // All attempts exhausted
+  clearPassword();
+  ctx.ui.notify("Max password attempts reached", "error");
+  ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("error", "sudoer locked — ask user"));
+  return null;
 }
 
 // ─── MaskedInput Component ───────────────────────────────────────────────────
@@ -294,13 +341,10 @@ export default function (pi: ExtensionAPI) {
 
     // Check if we need a password
     if (!isPasswordValid(config) && config.autoCache) {
-      const password = await promptPassword(ctx);
+      const password = await promptAndVerify(ctx, config);
       if (!password) {
-        return { block: true, reason: "Password not provided \u2014 sudo command blocked" };
+        return { block: true, reason: "Password not provided or failed verification \u2014 sudo command blocked" };
       }
-      cachedPassword = password;
-      passwordTimestamp = Date.now();
-      ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("success", "sudoer authenticated"));
     }
 
     // If password is still not valid (expired or user cancelled earlier), block
@@ -354,15 +398,12 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Prompt for password
-      const password = await promptPassword(ctx);
+      // Prompt for password (with verification loop)
+      const password = await promptAndVerify(ctx, config);
       if (password) {
-        cachedPassword = password;
-        passwordTimestamp = Date.now();
         ctx.ui.notify("Sudo password cached", "success");
-        ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("success", "sudoer authenticated"));
       } else {
-        ctx.ui.notify("Password not set", "warning");
+        ctx.ui.notify("Password not set or failed verification", "warning");
       }
     },
   });
@@ -382,22 +423,20 @@ export default function (pi: ExtensionAPI) {
       const cmd = params.command;
       const fullCommand = `sudo ${cmd}`;
 
-      // Ensure password is cached
+      // Ensure password is cached (with verification loop)
       if (!isPasswordValid(config)) {
-        const password = await promptPassword(ctx);
+        const password = await promptAndVerify(ctx, config);
         if (!password) {
           return {
             content: [
               {
                 type: "text",
-                text: "Sudo password not provided — command blocked.",
+                text: "Sudo password not provided or failed verification — command blocked.",
               },
             ],
             details: {},
           };
         }
-        cachedPassword = password;
-        passwordTimestamp = Date.now();
       }
 
       // Dangerous command check
