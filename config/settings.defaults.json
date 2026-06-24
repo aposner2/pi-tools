@@ -1,0 +1,14 @@
+{
+  "theme": "dark",
+  "defaultProvider": "{{DEFAULT_PROVIDER}}",
+  "defaultModel": "{{DEFAULT_MODEL}}",
+  "packages": [
+    "npm:pi-mcp-adapter",
+    "npm:pi-ask-user",
+    "git:git@github.com:aposner2/pi-tools"
+  ],
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "defaultThinkingLevel": "high"
+}

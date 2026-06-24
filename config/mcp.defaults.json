@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mcp-searxng": {
+      "url": "{{MCP_SEARXNG_URL}}",
+      "directTools": true
+    }
+  }
+}

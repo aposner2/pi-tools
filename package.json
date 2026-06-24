@@ -1,7 +1,7 @@
 {
   "name": "pi-tools",
   "version": "0.1.0",
-  "description": "Consolidated pi tools: sudoer, large-write, hostname-badge, skills, and prompts",
+  "description": "Consolidated pi tools: extensions, skills, config defaults, and setup script for the pi coding agent",
   "keywords": [
     "pi-package"
   ],
@@ -22,9 +22,6 @@
     ],
     "skills": [
       "./skills"
-    ],
-    "prompts": [
-      "./prompts"
     ]
   },
   "devDependencies": {

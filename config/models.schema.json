@@ -1,0 +1,50 @@
+{
+  "providers": {
+    "{{PROVIDER_NAME}}": {
+      "baseUrl": "{{BASE_URL}}",
+      "api": "openai-completions",
+      "apiKey": "{{API_KEY}}",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "maxTokensField": "max_tokens",
+        "thinkingFormat": "qwen-chat-template"
+      },
+      "models": [
+        {
+          "id": "qwen3.6-27b-mtp",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 262144,
+          "maxTokens": 81920
+        },
+        {
+          "id": "qwen/qwen3.6-27b",
+          "reasoning": true
+        },
+        {
+          "id": "qwen/qwen3.6-35b-a3b",
+          "reasoning": true
+        },
+        {
+          "id": "qwen/qwen3-coder-next"
+        },
+        {
+          "id": "qwen2.5-coder-32b-instruct"
+        },
+        {
+          "id": "google/gemma-4-31b"
+        },
+        {
+          "id": "google/gemma-4-26b-a4b-qat"
+        },
+        {
+          "id": "google/gemma-4-12b-qat"
+        },
+        {
+          "id": "google/gemma-4-e4b"
+        }
+      ]
+    }
+  }
+}
