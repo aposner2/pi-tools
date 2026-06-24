@@ -74,20 +74,67 @@ function loadConfig(cwd: string): SudoerConfig {
   return { ...DEFAULT_CONFIG };
 }
 
-// ─── Password State ──────────────────────────────────────────────────────────
+// ─── Password State (per-host cache) ────────────────────────────────────────
 
-let cachedPassword: string | null = null;
-let passwordTimestamp: number | null = null;
+interface CachedEntry {
+  password: string;
+  timestamp: number;
+}
 
-function isPasswordValid(config: SudoerConfig): boolean {
-  if (!cachedPassword || passwordTimestamp === null) return false;
-  const ageMinutes = (Date.now() - passwordTimestamp) / 60000;
+const passwordCache = new Map<string, CachedEntry>();
+
+function getHostKey(): string {
+  return os.hostname();
+}
+
+/** Extract the target host from commands like `ssh hostX "sudo ..."` or `sudo ssh hostX`. */
+function extractTargetHost(command: string): string | null {
+  // Match patterns: ssh <host>, ssh -l user <host>, ssh user@host, ssh <ip>
+  const match = command.match(/\bssh\s+(?:-[a-zA-Z]+\s+)*(?:(?:-l\s+\S+\s+)?)?(?:\S+@)?(\S+)/);
+  if (match) {
+    // Filter out flags, quotes, and common non-host tokens
+    const candidate = match[1].replace(/["']/g, "");
+    if (!candidate.startsWith("-") && !candidate.includes(":") || /^\d+\.\d+/.test(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function getHostForCommand(command: string): string {
+  // If the command involves SSH to a remote host, use that as the key.
+  // Otherwise use local hostname.
+  const target = extractTargetHost(command);
+  if (target) return target;
+  return getHostKey();
+}
+
+function isPasswordValid(config: SudoerConfig, host?: string): boolean {
+  const key = host || getHostKey();
+  const entry = passwordCache.get(key);
+  if (!entry) return false;
+  const ageMinutes = (Date.now() - entry.timestamp) / 60000;
   return ageMinutes < config.passwordTimeout;
 }
 
-function clearPassword(): void {
-  cachedPassword = null;
-  passwordTimestamp = null;
+function getCachedPassword(host?: string): string | null {
+  const key = host || getHostKey();
+  const entry = passwordCache.get(key);
+  if (!entry) return null;
+  return entry.password;
+}
+
+function setCachedPassword(password: string, host?: string): void {
+  const key = host || getHostKey();
+  passwordCache.set(key, { password, timestamp: Date.now() });
+}
+
+function clearPassword(host?: string): void {
+  if (host) {
+    passwordCache.delete(host);
+  } else {
+    passwordCache.clear();
+  }
 }
 
 function isSudoAuthFailure(output: string): boolean {
@@ -123,17 +170,17 @@ function verifyPassword(password: string): boolean {
 async function promptAndVerify(
   ctx: ExtensionContext,
   config: SudoerConfig,
+  host?: string,
 ): Promise<string | null> {
   const maxAttempts = config.maxPasswordAttempts;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const password = await promptPassword(ctx);
+    const password = await promptPassword(ctx, host);
     if (!password) return null; // user cancelled
 
     if (verifyPassword(password)) {
-      cachedPassword = password;
-      passwordTimestamp = Date.now();
-      ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("success", "sudoer authenticated"));
+      setCachedPassword(password, host);
+      ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("success", `sudoer authenticated (${host || getHostKey()})`));
       return password;
     }
 
@@ -144,9 +191,9 @@ async function promptAndVerify(
   }
 
   // All attempts exhausted
-  clearPassword();
+  clearPassword(host);
   ctx.ui.notify("Max password attempts reached", "error");
-  ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("error", "sudoer locked — ask user"));
+  ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("error", `sudoer locked (${host || getHostKey()}) — ask user`));
   return null;
 }
 
@@ -236,13 +283,14 @@ class MaskedInput implements Component, Focusable {
 
 async function promptPassword(
   ctx: ExtensionContext,
+  host?: string,
 ): Promise<string | null> {
   if (ctx.mode !== "tui") {
     ctx.ui.notify("Sudoer: cannot prompt for password in non-TUI mode", "warning");
     return null;
   }
 
-  const hostname = os.hostname();
+  const targetHost = host || os.hostname();
 
   return ctx.ui.custom<string | null>(
     (tui, theme, _keybindings, done) => {
@@ -255,7 +303,8 @@ async function promptPassword(
       container.addChild(new Text(theme.fg("accent", theme.bold("Sudoer")), 1, 0));
 
       // Hostname
-      container.addChild(new Text(`Host: ${hostname}`, 1, 0));
+      const hostLabel = targetHost === os.hostname() ? "local" : `remote (${targetHost})`;
+      container.addChild(new Text(`Host: ${hostLabel}`, 1, 0));
 
       // Prompt
       container.addChild(new Text("Enter sudo password:", 1, 0));
@@ -339,17 +388,20 @@ export default function (pi: ExtensionAPI) {
     const command = event.input.command;
     if (!command || !/\bsudo\b/.test(command)) return;
 
+    // Determine the host key for this command
+    const hostKey = getHostForCommand(command);
+
     // Check if we need a password
-    if (!isPasswordValid(config) && config.autoCache) {
-      const password = await promptAndVerify(ctx, config);
+    if (!isPasswordValid(config, hostKey) && config.autoCache) {
+      const password = await promptAndVerify(ctx, config, hostKey);
       if (!password) {
-        return { block: true, reason: "Password not provided or failed verification \u2014 sudo command blocked" };
+        return { block: true, reason: `Password not provided or failed verification for ${hostKey} — sudo command blocked` };
       }
     }
 
     // If password is still not valid (expired or user cancelled earlier), block
-    if (!isPasswordValid(config)) {
-      return { block: true, reason: "Sudo password expired or not provided \u2014 command blocked" };
+    if (!isPasswordValid(config, hostKey)) {
+      return { block: true, reason: `Sudo password expired or not provided for ${hostKey} — command blocked` };
     }
 
     // Dangerous command confirmation
@@ -364,7 +416,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     // Rewrite command to use sudo -S with stdin password
-    const password = cachedPassword!;
+    const hostKey = getHostForCommand(command);
+    const password = getCachedPassword(hostKey)!;
     event.input.command = rewriteSudoCommand(command, password);
   });
 
@@ -379,29 +432,37 @@ export default function (pi: ExtensionAPI) {
     const output = content.map((c: any) => c.text || "").join("\n");
     if (!/\bsudo\b/.test(output) && !/\bsudo\b/.test(event.input?.command || "")) return;
 
-    // Check for sudo authentication failure
-    if (isSudoAuthFailure(output)) {
-      clearPassword();
-      ctx.ui.notify("Sudo password failed \u2014 cached password cleared", "warning");
-      ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("warning", "sudoer password failed"));
-    }
+      // Check for sudo authentication failure — clear the relevant host entry
+      if (isSudoAuthFailure(output)) {
+        const failedHost = getHostForCommand(event.input?.command || "");
+        clearPassword(failedHost);
+        ctx.ui.notify(`Sudo password failed for ${failedHost} — cached password cleared`, "warning");
+        ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("warning", `sudoer password failed (${failedHost})`));
+      }
   });
 
   // Register /sudo-password command
   pi.registerCommand("sudo-password", {
-    description: "Set or clear the cached sudo password",
+    description: "Set or clear the cached sudo password (optionally for a specific host)",
     handler: async (args, ctx) => {
-      if (args?.trim() === "clear") {
-        clearPassword();
-        ctx.ui.notify("Sudo password cleared", "info");
+      const trimmed = args?.trim();
+
+      // Handle "clear [host]" — clears all if no host specified
+      if (trimmed === "clear" || trimmed?.startsWith("clear ")) {
+        const targetHost = trimmed === "clear" ? undefined : trimmed.slice(6).trim() || undefined;
+        clearPassword(targetHost);
+        ctx.ui.notify(`Sudo password cleared${targetHost ? ` for ${targetHost}` : " (all hosts)"}`, "info");
         ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("muted", "sudoer ready"));
         return;
       }
 
+      // If args provided as a hostname, prompt for that host specifically
+      const targetHost = trimmed || undefined;
+
       // Prompt for password (with verification loop)
-      const password = await promptAndVerify(ctx, config);
+      const password = await promptAndVerify(ctx, config, targetHost);
       if (password) {
-        ctx.ui.notify("Sudo password cached", "success");
+        ctx.ui.notify(`Sudo password cached${targetHost ? ` for ${targetHost}` : ""}`, "success");
       } else {
         ctx.ui.notify("Password not set or failed verification", "warning");
       }
@@ -424,14 +485,15 @@ export default function (pi: ExtensionAPI) {
       const fullCommand = `sudo ${cmd}`;
 
       // Ensure password is cached (with verification loop)
-      if (!isPasswordValid(config)) {
-        const password = await promptAndVerify(ctx, config);
+      const hostKey = getHostForCommand(fullCommand);
+      if (!isPasswordValid(config, hostKey)) {
+        const password = await promptAndVerify(ctx, config, hostKey);
         if (!password) {
           return {
             content: [
               {
                 type: "text",
-                text: "Sudo password not provided or failed verification — command blocked.",
+                text: `Sudo password not provided or failed verification for ${hostKey} — command blocked.`,
               },
             ],
             details: {},
