@@ -416,7 +416,6 @@ export default function (pi: ExtensionAPI) {
     }
 
     // Rewrite command to use sudo -S with stdin password
-    const hostKey = getHostForCommand(command);
     const password = getCachedPassword(hostKey)!;
     event.input.command = rewriteSudoCommand(command, password);
   });
