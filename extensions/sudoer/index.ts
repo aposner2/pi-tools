@@ -2,9 +2,11 @@
  * Pi Sudoer Extension
  *
  * Lets an AI coding agent run `sudo` commands without requiring passwordless
- * sudo in /etc/sudoers. Intercepts sudo commands, prompts the user for their
- * password via a masked password input dialog, caches it in memory, and
- * rewrites commands to use `sudo -S` (stdin password, no TTY needed).
+ * sudo in /etc/sudoers. Uses a two-step flow:
+ *   1. LLM calls `sudo_auth()` to authenticate (shows masked TUI dialog)
+ *   2. Subsequent `sudo` commands use the cached password automatically
+ *
+ * This avoids blocking on inline prompts and works cleanly in any mode.
  */
 
 import * as fs from "node:fs";
@@ -165,38 +167,6 @@ function verifyPassword(password: string): boolean {
   }
 }
 
-// ─── Prompt + Verify (up to maxPasswordAttempts) ─────────────────────────────
-
-async function promptAndVerify(
-  ctx: ExtensionContext,
-  config: SudoerConfig,
-  host?: string,
-): Promise<string | null> {
-  const maxAttempts = config.maxPasswordAttempts;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const password = await promptPassword(ctx, host);
-    if (!password) return null; // user cancelled
-
-    if (verifyPassword(password)) {
-      setCachedPassword(password, host);
-      ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("success", `sudoer authenticated (${host || getHostKey()})`));
-      return password;
-    }
-
-    const remaining = maxAttempts - attempt;
-    if (remaining > 0) {
-      ctx.ui.notify(`Password incorrect — ${remaining} attempt(s) remaining`, "warning");
-    }
-  }
-
-  // All attempts exhausted
-  clearPassword(host);
-  ctx.ui.notify("Max password attempts reached", "error");
-  ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("error", `sudoer locked (${host || getHostKey()}) — ask user`));
-  return null;
-}
-
 // ─── MaskedInput Component ───────────────────────────────────────────────────
 
 class MaskedInput implements Component, Focusable {
@@ -345,6 +315,38 @@ async function promptPassword(
   );
 }
 
+// ─── Prompt + Verify (up to maxPasswordAttempts) ─────────────────────────────
+
+async function promptAndVerify(
+  ctx: ExtensionContext,
+  config: SudoerConfig,
+  host?: string,
+): Promise<string | null> {
+  const maxAttempts = config.maxPasswordAttempts;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const password = await promptPassword(ctx, host);
+    if (!password) return null; // user cancelled
+
+    if (verifyPassword(password)) {
+      setCachedPassword(password, host);
+      ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("success", `sudoer authenticated (${host || getHostKey()})`));
+      return password;
+    }
+
+    const remaining = maxAttempts - attempt;
+    if (remaining > 0) {
+      ctx.ui.notify(`Password incorrect — ${remaining} attempt(s) remaining`, "warning");
+    }
+  }
+
+  // All attempts exhausted
+  clearPassword(host);
+  ctx.ui.notify("Max password attempts reached", "error");
+  ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("error", `sudoer locked (${host || getHostKey()}) — ask user`));
+  return null;
+}
+
 // ─── Dangerous Command Check ─────────────────────────────────────────────────
 
 function isDangerousCommand(
@@ -362,6 +364,12 @@ function rewriteSudoCommand(command: string, password: string): string {
   // Replace 'sudo' with 'sudo -S -k' and append here-string for password
   const rewritten = command.replace(/\bsudo\b/, "sudo -S -k");
   return `${rewritten} <<< '${escapedPassword}'`;
+}
+
+// ─── Auth Required Message ──────────────────────────────────────────────────
+
+function authRequiredMessage(host: string): string {
+  return `Sudo requires authentication for host "${host}".\nCall sudo_auth() first, then retry this command.`;
 }
 
 // ─── Main Extension ──────────────────────────────────────────────────────────
@@ -391,17 +399,9 @@ export default function (pi: ExtensionAPI) {
     // Determine the host key for this command
     const hostKey = getHostForCommand(command);
 
-    // Check if we need a password
-    if (!isPasswordValid(config, hostKey) && config.autoCache) {
-      const password = await promptAndVerify(ctx, config, hostKey);
-      if (!password) {
-        return { block: true, reason: `Password not provided or failed verification for ${hostKey} — sudo command blocked` };
-      }
-    }
-
-    // If password is still not valid (expired or user cancelled earlier), block
+    // If no valid password cached, tell LLM to call sudo_auth() first
     if (!isPasswordValid(config, hostKey)) {
-      return { block: true, reason: `Sudo password expired or not provided for ${hostKey} — command blocked` };
+      return { block: true, reason: authRequiredMessage(hostKey) };
     }
 
     // Dangerous command confirmation
@@ -440,7 +440,7 @@ export default function (pi: ExtensionAPI) {
       }
   });
 
-  // Register /sudo-password command
+  // Register /sudo-password command (user-facing, still does inline prompting)
   pi.registerCommand("sudo-password", {
     description: "Set or clear the cached sudo password (optionally for a specific host)",
     handler: async (args, ctx) => {
@@ -468,12 +468,68 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Register sudo_run tool
+  // Register sudo_auth tool — authenticates and caches the password.
+  // The LLM calls this ONCE before running any sudo commands.
+  pi.registerTool({
+    name: "sudo_auth",
+    label: "Sudo Auth",
+    description:
+      "Authenticate for sudo access. Shows a masked password dialog, verifies the password, and caches it for future sudo commands. Call this once before running any sudo commands.",
+    parameters: Type.Object({
+      host: Type.Optional(Type.String({
+        description: "Optional hostname to authenticate for (defaults to local machine)",
+      })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const targetHost = params.host || undefined;
+
+      // Already authenticated? Let user know.
+      if (isPasswordValid(config, targetHost)) {
+        const hostLabel = targetHost || getHostKey();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Already authenticated for "${hostLabel}". You can run sudo commands directly.`,
+            },
+          ],
+          details: {},
+        };
+      }
+
+      // Prompt + verify (up to maxPasswordAttempts)
+      const password = await promptAndVerify(ctx, config, targetHost);
+      if (password) {
+        const hostLabel = targetHost || getHostKey();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Authenticated for "${hostLabel}". Password cached for ${config.passwordTimeout} minutes. You can now run sudo commands directly.`,
+            },
+          ],
+          details: {},
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Authentication failed or cancelled. Please try again with sudo_auth().`,
+          },
+        ],
+        details: {},
+      };
+    },
+  });
+
+  // Register sudo_run tool (legacy — delegates to bash intercept after auth check)
   pi.registerTool({
     name: "sudo_run",
     label: "Sudo Run",
     description:
-      "Run a command with sudo privileges. Handles password authentication and dangerous command confirmation automatically.",
+      "Run a command with sudo privileges. If not authenticated, you must call sudo_auth() first.",
     parameters: Type.Object({
       command: Type.String({
         description: "The command to run with sudo (without the 'sudo' prefix)",
@@ -483,21 +539,18 @@ export default function (pi: ExtensionAPI) {
       const cmd = params.command;
       const fullCommand = `sudo ${cmd}`;
 
-      // Ensure password is cached (with verification loop)
+      // Check if authenticated
       const hostKey = getHostForCommand(fullCommand);
       if (!isPasswordValid(config, hostKey)) {
-        const password = await promptAndVerify(ctx, config, hostKey);
-        if (!password) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Sudo password not provided or failed verification for ${hostKey} — command blocked.`,
-              },
-            ],
-            details: {},
-          };
-        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: authRequiredMessage(hostKey),
+            },
+          ],
+          details: {},
+        };
       }
 
       // Dangerous command check
