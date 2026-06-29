@@ -70,18 +70,42 @@ export default function (pi: ExtensionAPI) {
       path: Type.Optional(Type.String({
         description: "File path (required on first call, remembered for subsequent calls)",
       })),
-      content: Type.String({
+      content: Type.Optional(Type.String({
         description: "Content chunk (keep under 10KB per call to avoid timeouts)",
-      }),
+      })),
       finalize: Type.Optional(Type.Boolean({
         description: "Set to true on the last call to write all accumulated content to disk",
+      })),
+      reset: Type.Optional(Type.Boolean({
+        description: "Set to true to discard any previously accumulated chunks and start fresh. Use when switching to a new file or restarting after an error.",
       })),
     }),
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const { path, content, finalize } = params;
+      const { path, content, finalize, reset } = params;
 
-      // First call must provide path
+      // Handle explicit reset — discard all pending chunks and start fresh
+      if (reset) {
+        if (!path) {
+          // Reset everything
+          pendingWrites.clear();
+          return {
+            content: [{ type: "text", text: "All pending writes cleared. Ready for a new file." }],
+          };
+        }
+        // Reset only the specified path
+        const wasCleared = pendingWrites.delete(path);
+        return {
+          content: [{
+            type: "text",
+            text: wasCleared
+              ? `Pending chunks for ${path} cleared. Ready to start fresh.`
+              : `No pending chunks found for ${path}. Ready to start fresh.`,
+          }],
+        };
+      }
+
+      // First call must provide path and content
       if (!path && !finalize) {
         const existing = pendingWrites.size > 0
           ? Array.from(pendingWrites.values())[0]
@@ -89,9 +113,9 @@ export default function (pi: ExtensionAPI) {
 
         if (existing && !finalize) {
           // Continue existing write
-          existing.chunks.push(content);
-          existing.totalBytes += Buffer.byteLength(content, "utf8");
-          existing.totalLines += content.split("\n").length;
+          existing.chunks.push(content!);
+          existing.totalBytes += Buffer.byteLength(content!, "utf8");
+          existing.totalLines += content!.split("\n").length;
 
           pi.appendEntry(STATE_KEY, existing);
 
@@ -105,7 +129,7 @@ export default function (pi: ExtensionAPI) {
           return {
             content: [{
               type: "text",
-              text: `Accumulated chunk ${existing.chunks.length} (${Buffer.byteLength(content, "utf8")} bytes). Total so far: ${existing.totalBytes} bytes. Set finalize=true when done.`,
+              text: `Accumulated chunk ${existing.chunks.length} (${Buffer.byteLength(content!, "utf8")} bytes). Total so far: ${existing.totalBytes} bytes. Set finalize=true when done.`,
             }],
           };
         }
@@ -125,6 +149,15 @@ export default function (pi: ExtensionAPI) {
           content: [{ type: "text", text: "Error: no path provided and no pending write." }],
           isError: true,
         };
+      }
+
+      // Auto-clear stale entries when starting a new file with a different path
+      if (path && pendingWrites.size > 0) {
+        const existingPath = Array.from(pendingWrites.keys())[0];
+        if (existingPath !== targetPath) {
+          console.log(`[large_write] Discarding ${pendingWrites.size} stale pending write(s) for new path: ${targetPath}`);
+          pendingWrites.clear();
+        }
       }
 
       const absPath = resolve(ctx.cwd, targetPath);
