@@ -18,7 +18,8 @@
       "./extensions/sudoer/index.ts",
       "./extensions/large-write/index.ts",
       "./extensions/hostname-badge/index.ts",
-      "./extensions/model-update/index.ts"
+      "./extensions/model-update/index.ts",
+      "./extensions/reanker/index.ts"
     ],
     "skills": [
       "./skills"
