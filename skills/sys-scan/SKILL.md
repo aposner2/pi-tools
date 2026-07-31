@@ -16,6 +16,22 @@ agent can answer system questions without re-running commands every time.
 
 ## Workflow
 
+### 0 — Check for Existing Scan
+
+Before running any commands, check whether a previous scan already exists:
+
+```bash
+test -f ~/.pi/sys-scan.md && echo "EXISTS" || echo "MISSING"
+```
+
+- **If the file does NOT exist** → proceed to Step 1.
+- **If the file EXISTS** → read it, note its timestamp, and use `ask_user` to present:
+
+> A system scan already exists (`~/.pi/sys-scan.md`, generated: `<timestamp>`). Would you like to re-run the scan or use the existing information?
+
+  - **Re-run scan** — proceed to Step 1.
+  - **Use existing scan** — read `~/.pi/sys-scan.md` and report its contents directly. Skip all remaining steps.
+
 ### 1 — Detect Platform
 
 Determine which OS is running and use the appropriate commands:
