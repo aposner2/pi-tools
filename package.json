@@ -19,7 +19,7 @@
       "./extensions/large-write/index.ts",
       "./extensions/hostname-badge/index.ts",
       "./extensions/model-update/index.ts",
-      "./extensions/reanker/index.ts"
+      "./extensions/reranker/index.ts"
     ],
     "skills": [
       "./skills"
