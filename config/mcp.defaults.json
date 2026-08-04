@@ -3,6 +3,9 @@
     "mcp-searxng": {
       "url": "{{MCP_SEARXNG_URL}}",
       "directTools": true
+    },
+    "hindsight": {
+      "url": "http://192.168.1.4:8888/mcp/alex-ai-global/"
     }
   }
 }
