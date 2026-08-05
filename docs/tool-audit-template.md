@@ -1,9 +1,13 @@
-# Pi Agent Tool Audit — atlas (this machine)
+# Pi Agent Tool Audit Template
 
-**Generated:** 2025-08-04  
-**Machine:** atlas  
-**Pi Core:** `@earendil-works/pi-coding-agent@0.83.0`  
-**Default Model:** qwen3.6-27b-mtp via LM Studio on Sparky (192.168.1.2:1234)
+> **Instructions:** Copy this file, replace all `{PLACEHOLDER}` values with your machine's actual data, and save as `tool-audit-{hostname}.md`. Then retain it to the "AI-stack" Hindsight bank.
+
+# Pi Agent Tool Audit — {MACHINE_NAME}
+
+**Generated:** {DATE}  
+**Machine:** {MACHINE_NAME}  
+**Pi Core:** `@earendil-works/pi-coding-agent@{PI_CORE_VERSION}`  
+**Default Model:** {DEFAULT_MODEL} via {PROVIDER_NAME} at {BASE_URL}
 
 ---
 
@@ -28,10 +32,10 @@
 
 | Field | Value |
 |-------|-------|
-| Package | `pi-tools@0.1.0` |
+| Package | `{PI_TOOLS_VERSION}` |
 | Source | `git:git@github.com:aposner2/pi-tools` |
 | Installed at | `~/.pi/agent/git/github.com/aposner2/pi-tools/` |
-| Git commit | `d2aeb92` (master) |
+| Git commit | `{GIT_COMMIT}` (master) |
 
 **Extensions (5):**
 
@@ -64,7 +68,7 @@
 
 | Field | Value |
 |-------|-------|
-| Package | `pi-mcp-adapter@2.20.1` |
+| Package | `{MCP_ADAPTER_VERSION}` |
 | Source | `npm:pi-mcp-adapter` → github.com/nicobailon/pi-mcp-adapter |
 | Installed at | `~/.pi/agent/npm/node_modules/pi-mcp-adapter/` |
 
@@ -81,7 +85,7 @@
 
 | Field | Value |
 |-------|-------|
-| Package | `pi-ask-user@0.14.0` |
+| Package | `{ASK_USER_VERSION}` |
 | Source | `npm:pi-ask-user` → github.com/edlsh/pi-ask-user |
 | Installed at | `~/.pi/agent/npm/node_modules/pi-ask-user/` |
 
@@ -101,7 +105,7 @@
 
 | Field | Value |
 |-------|-------|
-| Package | `pi-hindsight@1.4.2` |
+| Package | `{HINDSIGHT_VERSION}` |
 | Source | `npm:pi-hindsight` → github.com/anh-chu/pi-hindsight |
 | Installed at | `~/.pi/agent/npm/node_modules/pi-hindsight/` |
 
@@ -125,9 +129,9 @@
 
 | Field | Value |
 |-------|-------|
-| URL | `http://192.168.1.3:4005/mcp` |
+| URL | `{SEARXNG_MCP_URL}` |
 | Config | `~/.pi/agent/mcp.json` (directTools: true) |
-| Host machine | 192.168.1.3 (separate server) |
+| Host machine | {SEARXNG_HOST} |
 
 **Tools (2):**
 | Tool | Description |
@@ -141,9 +145,9 @@
 
 | Field | Value |
 |-------|-------|
-| URL | `http://192.168.1.4:8888/mcp/alex-ai-global/` |
+| URL | `{HINDSIGHT_MCP_URL}` |
 | Config | `~/.pi/agent/mcp.json` |
-| Host machine | 192.168.1.4 (agents server) |
+| Host machine | {HINDSIGHT_HOST} |
 
 **Tools (28):**
 
@@ -187,18 +191,15 @@
 
 ```json
 {
-  "theme": "dark",
-  "defaultProvider": "lmstudio",
-  "defaultModel": "qwen3.6-27b-mtp",
+  "theme": "{THEME}",
+  "defaultProvider": "{DEFAULT_PROVIDER}",
+  "defaultModel": "{DEFAULT_MODEL}",
   "packages": [
-    "npm:pi-mcp-adapter",
-    "npm:pi-ask-user",
-    "git:git@github.com:aposner2/pi-tools",
-    "npm:pi-hindsight"
+    {PACKAGES_LIST}
   ],
   "terminal": { "showTerminalProgress": true },
-  "lastChangelogVersion": "0.83.0",
-  "defaultThinkingLevel": "high",
+  "lastChangelogVersion": "{LAST_CHANGELOG_VERSION}",
+  "defaultThinkingLevel": "{THINKING_LEVEL}",
   "hideThinkingBlock": false
 }
 ```
@@ -208,13 +209,7 @@
 ```json
 {
   "mcpServers": {
-    "mcp-searxng": {
-      "url": "http://192.168.1.3:4005/mcp",
-      "directTools": true
-    },
-    "hindsight": {
-      "url": "http://192.168.1.4:8888/mcp/alex-ai-global/"
-    }
+    {MCP_SERVERS_CONFIG}
   }
 }
 ```
@@ -223,18 +218,18 @@
 
 | Provider | Base URL | API Type | Models Available |
 |----------|----------|----------|-----------------|
-| `lmstudio` | `http://192.168.1.2:1234/v1` | openai-completions | qwen3.6-27b-mtp (default, reasoning, 256K ctx), qwen/qwen3.6-27b, qwen/qwen3.6-35b-a3b, qwen/qwen3-coder-next, qwen2.5-coder-32b-instruct, google/gemma-4-31b, google/gemma-4-26b-a4b-qat, google/gemma-4-12b-qat, google/gemma-4-e4b |
+{MODELS_TABLE_ROWS}
 
-**Compat settings:** `supportsDeveloperRole: false`, `supportsReasoningEffort: false`, `thinkingFormat: qwen-chat-template`
+**Compat settings:** {COMPAT_SETTINGS}
 
 ### ~/.hindsight/config
 
 ```ini
-api_url = "http://192.168.1.4:8888"
-global_bank = "alex-ai-global"
-recall_types = "observation,experience"
-recall_budget = "mid"
-recall_max_tokens = 2048
+api_url = "{HINDSIGHT_API_URL}"
+global_bank = "{GLOBAL_BANK}"
+recall_types = "{RECALL_TYPES}"
+recall_budget = "{RECALL_BUDGET}"
+recall_max_tokens = {RECALL_MAX_TOKENS}
 async_retain = true
 homedir_project = false
 ```
@@ -306,8 +301,4 @@ All from hindsight MCP server at 192.168.1.4:8888/mcp/alex-ai-global/
 
 | Service | Host | Port | Required By |
 |---------|------|------|-------------|
-| LM Studio (LLM inference) | 192.168.1.2 (DGX Spark) | 1234 | All LLM calls, hindsight LLM provider |
-| SearXNG MCP server | 192.168.1.3 | 4005 | search-web, fetch-web tools |
-| Hindsight API + MCP | 192.168.1.4 (agents VM) | 8888 | All memory operations |
-| TEI Embedder | 192.168.1.4 (Docker) | internal | Hindsight embeddings (via agents-net) |
-| TEI Reranker | 192.168.1.4 (Docker) | internal | Hindsight reranking + tei_rerank tool |
+{NETWORK_DEPENDENCIES}
