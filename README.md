@@ -2,6 +2,8 @@
 
 Consolidated pi tools package: extensions, skills, prompts, and global config defaults for the pi coding agent.
 
+**Design principle:** pi-tools is the single source of truth for all pi agents on the network. Configs overwrite on update unless explicitly locked by the user.
+
 ## Quick Start — New Server
 
 ```bash
@@ -11,33 +13,66 @@ npm install -g @earendil-works/pi-coding-agent
 # 2. Install this package
 pi install git:git@github.com:aposner2/pi-tools
 
-# 3. Run setup (creates .env.local from template on first run)
-~/.pi/agent/git/github.com/aposner2/pi-tools/setup.sh
-
-# 4. Edit .env.local with your server-specific values, then re-run
-vi ~/.pi/agent/git/github.com/aposner2/pi-tools/config/.env.local
+# 3. Run setup (overwrites all configs with hardcoded LAN values)
 ~/.pi/agent/git/github.com/aposner2/pi-tools/setup.sh
 ```
 
-## Quick Start — Existing Server (merge)
-
-If you already have a `~/.pi/agent/` config and want to layer pi-tools on top:
-
-```bash
-pi install git:git@github.com:aposner2/pi-tools
-~/.pi/agent/git/github.com/aposner2/pi-tools/setup.sh
-```
-
-The setup script deep-merges defaults into your existing config. **On conflicting keys, it asks which version to keep.** Existing keys not in the defaults are preserved automatically.
-
-## Updating
+## Updating (Overwrite Mode)
 
 After changes are pushed to this repo:
 
 ```bash
 pi update --extensions
-~/.pi/agent/git/github.com/aposner2/pi-tools/setup.sh   # re-merge config
+~/.pi/agent/git/github.com/aposner2/pi-tools/setup.sh   # overwrites configs (skips locked files)
 ```
+
+**All three config files (`settings.json`, `models.json`, `mcp.json`) are overwritten with pi-tools defaults.** Locked files are skipped and preserved.
+
+## Config Lock System
+
+pi-tools manages three config files in `~/.pi/agent/`:
+
+| File | Purpose | Overwritten? |
+|------|---------|-------------|
+| `settings.json` | Theme, provider, model, packages, thinking level | ✅ Unless locked |
+| `models.json` | Provider definitions with model list (hardcoded LAN IPs) | ✅ Unless locked |
+| `mcp.json` | MCP server configuration (hardcoded LAN IPs) | ✅ Unless locked |
+
+### Lock/Unlock Workflow
+
+```bash
+# Check lock status of all files
+pi-config status
+
+# Lock a file (prevent overwrite on next update)
+pi-config lock settings -r "Custom theme preference"
+
+# Unlock a file (allow overwrite on next update)
+pi-config unlock settings
+
+# Edit a file and auto-lock after saving
+pi-config edit mcp
+
+# Revert to pi-tools defaults (auto-locks the reverted file)
+pi-config revert models [commit-hash]
+
+# Force overwrite even if locked
+pi-config force settings
+
+# See differences between current and pi-tools default
+pi-config diff mcp
+```
+
+### Lock File Format
+
+Locks live in `~/.pi/agent/.pi-lock/<name>.lock`:
+```
+# Locked: 2025-08-04 14:30:00
+# Reason: Custom theme preference
+# Commit: abc1234
+```
+
+When a file is locked, `setup.sh` skips it and shows the lock metadata. The file preserves its current state across updates until explicitly unlocked.
 
 ## Contents
 
@@ -60,22 +95,31 @@ pi update --extensions
 
 ### Config Defaults (`config/`)
 
-| File | Purpose |
-|------|---------|
-| `settings.defaults.json` | Theme, provider, model, packages, thinking level |
-| `models.schema.json` | Provider definitions with model list (URLs from `.env.local`) |
-| `mcp.defaults.json` | MCP server configuration (URLs from `.env.local`) |
-| `.env.example` | Template for server-specific values — copy to `.env.local` |
+All config files use **hardcoded LAN IPs** — no `.env.local` or template variables needed:
 
-Server-specific values (IP addresses, API keys) are read from `config/.env.local`. On first run of `setup.sh`, the template is copied automatically.
+| File | Purpose | Key Values |
+|------|---------|------------|
+| `settings.defaults.json` | Theme, provider, model, packages | `lmstudio`, `qwen3.6-27b-mtp` |
+| `models.schema.json` | Provider definitions | LM Studio at `192.168.1.2:1234/v1` |
+| `mcp.defaults.json` | MCP servers | hindsight → `192.168.1.4:8888`, searxng → `192.168.1.3:4005` |
 
 ### Setup Script (`setup.sh`)
 
-- Deep-merges defaults into existing `~/.pi/agent/settings.json`, `models.json`, and `mcp.json`
-- **Asks on every conflict** — choose current, default, or manual merge
-- Preserves keys that exist in your config but not in defaults
-- Prompts to add new keys from defaults that don't exist yet
+- **Overwrites** all three config files with hardcoded defaults
+- **Skips locked files** — shows lock metadata and preserves current state
+- Installs git hook for auto-setup after `pi update --extensions`
 - Idempotent — safe to re-run after updates
+
+### pi-config CLI Tool (`bin/pi-config`)
+
+Manage config locks, reverts, and local customizations:
+- `status` — show lock state of all config files
+- `lock <file> [-r reason]` — prevent overwrite on next update
+- `unlock <file>` — allow overwrite on next update
+- `edit <file>` — open in editor, auto-lock after saving
+- `revert <file> [commit]` — restore defaults from pi-tools (auto-locks)
+- `force <file>` — overwrite even if locked
+- `diff <file>` — compare current vs pi-tools default
 
 ## License
 

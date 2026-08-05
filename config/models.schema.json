@@ -1,9 +1,9 @@
 {
   "providers": {
-    "{{PROVIDER_NAME}}": {
-      "baseUrl": "{{BASE_URL}}",
+    "lmstudio": {
+      "baseUrl": "http://192.168.1.2:1234/v1",
       "api": "openai-completions",
-      "apiKey": "{{API_KEY}}",
+      "apiKey": "sk-lm-5S9CVqE9:FJOjCrqv9BocSpOEPyP4",
       "compat": {
         "supportsDeveloperRole": false,
         "supportsReasoningEffort": false,

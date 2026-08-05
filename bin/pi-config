@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# pi-config — Manage pi config locks, reverts, and local customizations.
+
+set -euo pipefail
+
+PI_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+LOCK_DIR="$PI_DIR/.pi-lock"
+TOOLS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+CONFIGS=("settings:settings.json" "models:models.json" "mcp:mcp.json")
+
+usage() {
+    cat << 'EOF'
+Usage: pi-config <command> [options]
+
+Commands:
+  status                    Show lock state of all config files
+  lock <file> [-r reason]   Lock a file (prevent overwrite on update)
+  unlock <file>             Unlock a file (allow overwrite on next update)
+  edit <file>               Open file in $EDITOR, auto-lock after saving
+  revert <file> [commit]    Revert to pi-tools default (auto-locks the file)
+  revert --all              Revert all files to defaults (auto-locks all)
+  force <file>              Overwrite with defaults even if locked
+  diff <file>               Show differences between current and pi-tools default
+
+Files: settings, models, mcp
+EOF
+}
+
+timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
+
+lock_file() {
+    local name="$1" reason="${2:-}"
+    mkdir -p "$LOCK_DIR"
+    cat > "$LOCK_DIR/${name}.lock" << EOF
+# Locked: $(timestamp)
+# Reason: ${reason:-User customization}
+# Commit: $(cd "$TOOLS_DIR" && git rev-parse HEAD 2>/dev/null || echo 'unknown')
+EOF
+    echo "🔒 $name locked."
+}
+
+unlock_file() {
+    local name="$1"
+    if [ -f "$LOCK_DIR/${name}.lock" ]; then
+        rm "$LOCK_DIR/${name}.lock"
+        echo "🔓 $name unlocked."
+    else
+        echo "⚠️  $name is not locked."
+    fi
+}
+
+is_locked() { [ -f "$LOCK_DIR/${1}.lock" ]; }
+
+get_default_file() {
+    case "$1" in
+        settings) echo "settings.defaults.json" ;;
+        models)   echo "models.schema.json" ;;
+        mcp)      echo "mcp.defaults.json" ;;
+        *) echo "Unknown config: $1"; return 1 ;;
+    esac
+}
+
+get_target_file() {
+    case "$1" in
+        settings) echo "settings.json" ;; models) echo "models.json" ;; mcp) echo "mcp.json" ;; *) echo "Unknown: $1"; exit 1 ;;
+    esac
+}
+
+cmd_status() {
+    echo ""
+    echo "Config Lock Status ($(timestamp))"
+    echo "=================================="
+    for entry in "${CONFIGS[@]}"; do
+        IFS=':' read -r name file <<< "$entry"
+        if is_locked "$name"; then
+            echo ""
+            echo "🔒 $name ($file)"
+            cat "$LOCK_DIR/${name}.lock" | sed 's/^/   /'
+        else
+            echo "🔓 $name ($file) — will be overwritten on next update"
+        fi
+    done
+    echo ""
+}
+
+cmd_lock() {
+    local name="" reason=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -r|--reason) reason="$2"; shift 2 ;;
+            *) name="$1"; shift ;;
+        esac
+    done
+    [ -z "$name" ] && { echo "Usage: pi-config lock <file> [-r reason]"; exit 1; }
+    is_locked "$name" && { echo "⚠️  $name is already locked."; return; }
+    lock_file "$name" "$reason"
+}
+
+cmd_unlock() {
+    local name="${1:-}"
+    [ -z "$name" ] && { echo "Usage: pi-config unlock <file>"; exit 1; }
+    unlock_file "$name"
+}
+
+cmd_edit() {
+    local name="${1:-}"
+    [ -z "$name" ] && { echo "Usage: pi-config edit <file>"; exit 1; }
+    local file="$(get_target_file "$name")"
+    local target="$PI_DIR/$file"
+    [ -f "$target" ] || { echo "File not found: $target"; exit 1; }
+
+    echo "Opening $target in editor..."
+    "${EDITOR:-nano}" "$target"
+
+    if ! is_locked "$name"; then
+        lock_file "$name" "Edited via pi-config edit on $(date '+%Y-%m-%d')"
+    fi
+}
+
+cmd_revert() {
+    local all=false name="" commit=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --all) all=true; shift ;;
+            *) if [ -z "$name" ]; then name="$1"; else commit="$1"; fi; shift ;;
+        esac
+    done
+
+    if $all; then
+        for entry in "${CONFIGS[@]}"; do
+            IFS=':' read -r n f <<< "$entry"
+            revert_one "$n" ""
+        done
+        return
+    fi
+    [ -z "$name" ] && { echo "Usage: pi-config revert <file> [commit]"; exit 1; }
+    revert_one "$name" "$commit"
+}
+
+revert_one() {
+    local name="$1" commit="${2:-HEAD}"
+    local file="$(get_target_file "$name")"
+    local config_file="$(get_default_file "$name")"
+
+    local default_content
+    default_content="$(cd "$TOOLS_DIR" && git show "${commit}:config/${config_file}" 2>/dev/null)" || {
+        default_content="$(cat "$TOOLS_DIR/config/${config_file}")"
+    }
+
+    echo "$default_content" | jq --sort-keys '.' > "$PI_DIR/$file"
+    lock_file "$name" "Reverted to pi-tools $(cd "$TOOLS_DIR" && git log -1 --format='%h %s' 2>/dev/null || echo 'defaults')"
+    echo "↩️  $name reverted and locked."
+}
+
+cmd_force() {
+    local name="${1:-}"
+    [ -z "$name" ] && { echo "Usage: pi-config force <file>"; exit 1; }
+    unlock_file "$name" >/dev/null 2>&1 || true
+    bash "$TOOLS_DIR/setup.sh" 2>/dev/null
+    echo "⚡ $name force-overwritten with pi-tools defaults (unlocked)."
+}
+
+cmd_diff() {
+    local name="${1:-}"
+    [ -z "$name" ] && { echo "Usage: pi-config diff <file>"; exit 1; }
+    local file="$(get_target_file "$name")"
+    local config_file="$(get_default_file "$name")"
+    local target="$PI_DIR/$file"
+    [ -f "$target" ] || { echo "File not found: $target"; exit 1; }
+
+    diff <(jq --sort-keys '.' "$TOOLS_DIR/config/${config_file}") "$target" && echo "No differences." || true
+}
+
+# ── Main dispatch ────────────────────────────────────────
+command="${1:-}"
+shift 2>/dev/null || true
+
+case "$command" in
+    status)   cmd_status ;;
+    lock)     cmd_lock "$@" ;;
+    unlock)   cmd_unlock "$@" ;;
+    edit)     cmd_edit "$@" ;;
+    revert)   cmd_revert "$@" ;;
+    force)    cmd_force "$@" ;;
+    diff)     cmd_diff "$@" ;;
+    *)        usage; exit 1 ;;
+esac

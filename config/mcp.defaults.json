@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "mcp-searxng": {
-      "url": "{{MCP_SEARXNG_URL}}",
-      "directTools": true
+    "hindsight-memory": {
+      "url": "http://192.168.1.4:8888/mcp"
     },
-    "hindsight": {
-      "url": "http://192.168.1.4:8888/mcp/alex-ai-global/"
+    "mcp-searxng": {
+      "directTools": true,
+      "url": "http://192.168.1.3:4005/mcp"
     }
   }
 }

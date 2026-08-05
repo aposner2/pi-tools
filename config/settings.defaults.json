@@ -1,7 +1,7 @@
 {
   "theme": "dark",
-  "defaultProvider": "{{DEFAULT_PROVIDER}}",
-  "defaultModel": "{{DEFAULT_MODEL}}",
+  "defaultProvider": "lmstudio",
+  "defaultModel": "qwen3.6-27b-mtp",
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:pi-ask-user",
