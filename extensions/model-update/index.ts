@@ -18,34 +18,56 @@ import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 
 const MODELS_JSON = path.join(os.homedir(), ".pi", "agent", "models.json");
 
-// ─── Known Model Specs (from HuggingFace) ─────────────────────────────────────
+// ─── Known Model Specs (from HuggingFace docs, verified Aug 2026) ──────────────
+// Source URLs:
+//   Qwen3.8-27B: https://huggingface.co/Qwen/Qwen3.8-27B
+//   Qwen3-Coder-30B-A3B: https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct
+//   Devstral-Small-2507: https://huggingface.co/mistralai/Devstral-Small-2507
+//   Qwen2.5-VL-72B: https://huggingface.co/Qwen/Qwen2.5-VL-72B-Instruct
+
+// Per-model reasoning_effort options (from official HuggingFace docs):
+//   Qwen3.8-27B: xhigh (default), medium, low — https://huggingface.co/Qwen/Qwen3.8-27B
+//   Qwen3.6 family: low, medium, high, xhigh (all accepted by LMS API)
+//   Qwen3-Coder-30B-A3B: non-thinking only — no reasoning_effort support
+//   Devstral-Small-2507: no thinking mode (Mistral lineage)
+
+type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 interface ModelSpec {
   reasoning?: boolean;
-  input: string[];
+  input: ("text" | "image")[];
   contextWindow: number;
   maxTokens: number;
+  displayName?: string;
+  // Valid reasoning_effort values for this model (from official docs)
+  reasoningEffortOptions?: ReasoningEffort[];
 }
 
 const KNOWN_SPECS: Record<string, ModelSpec> = {
-  // Qwen3.6 family
-  "qwen/qwen3.6-27b": { reasoning: true, input: ["text", "image"], contextWindow: 262144, maxTokens: 81920 },
-  "qwen3.6-27b-mtp": { reasoning: true, input: ["text", "image"], contextWindow: 262144, maxTokens: 81920 },
-  "qwen/qwen3.6-35b-a3b": { reasoning: true, input: ["text", "image"], contextWindow: 262144, maxTokens: 81920 },
+  // ── Qwen3.8 family (newest) ─────────────────────────────────────
+  // Official docs: reasoning_effort options are xhigh (default), medium, low
+  "qwen/qwen3.8-27b": { displayName: "Qwen3.8-27B", reasoning: true, input: ["text", "image"], contextWindow: 262144, maxTokens: 81920, reasoningEffortOptions: ["xhigh", "medium", "low"] },
 
-  // Qwen3-Coder-Next (80B MoE, 3B active)
-  "qwen/qwen3-coder-next": { reasoning: true, input: ["text"], contextWindow: 262144, maxTokens: 81920 },
+  // ── Qwen3.6 family (MTP + uncensored) ───────────────────────────
+  // LMS API accepts all four values; xhigh tested and working
+  "qwen3.6-27b-mtp": { displayName: "Qwen3.6-27B-MTP", reasoning: true, input: ["text", "image"], contextWindow: 262144, maxTokens: 81920, reasoningEffortOptions: ["xhigh", "high", "medium", "low"] },
+  // Uncensored fine-tune of Qwen3.6 — supports thinking mode (default on)
+  "qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive": { displayName: "Qwen3.6-35B-A3B Uncensored", reasoning: true, input: ["text", "image"], contextWindow: 262144, maxTokens: 81920, reasoningEffortOptions: ["xhigh", "high", "medium", "low"] },
 
-  // Qwen2.5-Coder-32B
-  "qwen2.5-coder-32b-instruct": { reasoning: false, input: ["text"], contextWindow: 131072, maxTokens: 32768 },
+  // ── Qwen3-Coder (MoE) — non-thinking only per HF docs ───────────
+  "qwen/qwen3-coder-30b": { displayName: "Qwen3-Coder-30B-A3B", reasoning: false, input: ["text"], contextWindow: 262144, maxTokens: 81920 },
 
-  // Gemma 4 family
-  "google/gemma-4-31b": { reasoning: true, input: ["text", "image"], contextWindow: 524288, maxTokens: 81920 },
-  "google/gemma-4-26b-a4b-qat": { reasoning: true, input: ["text", "image"], contextWindow: 524288, maxTokens: 81920 },
-  "google/gemma-4-12b-qat": { reasoning: true, input: ["text", "image"], contextWindow: 524288, maxTokens: 81920 },
-  "google/gemma-4-e4b": { reasoning: false, input: ["text"], contextWindow: 524288, maxTokens: 32768 },
+  // ── Mistral Devstral (coding agent) — no thinking mode ───────────
+  "devstral-small-2507": { displayName: "Devstral-Small-2507", reasoning: false, input: ["text"], contextWindow: 131072, maxTokens: 65536 },
 
-  // Embedding models (skip)
+  // ── Qwen2.5-VL (vision-language, largest) — no thinking mode ────
+  "qwen2.5-vl-72b-instruct": { displayName: "Qwen2.5-VL-72B", reasoning: false, input: ["text", "image"], contextWindow: 131072, maxTokens: 65536 },
+
+  // ── Bonsai-27B (community fine-tune) — no official thinking docs ─
+  "bonsai-27b@q1_0": { displayName: "Bonsai-27B Q1", reasoning: false, input: ["text", "image"], contextWindow: 131072, maxTokens: 65536 },
+  "bonsai-27b@q4_1": { displayName: "Bonsai-27B Q4", reasoning: false, input: ["text", "image"], contextWindow: 131072, maxTokens: 65536 },
+
+  // ── Embedding models (skipped by isEmbeddingModel) ──────────────
   "text-embedding-nomic-embed-text-v1.5": { reasoning: false, input: ["text"], contextWindow: 8192, maxTokens: 0 },
 };
 
@@ -55,13 +77,30 @@ function isEmbeddingModel(id: string): boolean {
 
 // ─── Models.json helpers ──────────────────────────────────────────────────────
 
+// ─── Models.json schema (on disk) ─────────────────────────────────────────────
+// Note: models.json is a subset of PI's ProviderModelConfig.
+// When passed to pi.registerProvider(), we fill in required fields (name, cost).
+
 interface ModelEntry {
   id: string;
   reasoning?: boolean;
-  input?: string[];
+  input?: ("text" | "image")[];
   contextWindow?: number;
   maxTokens?: number;
-  compat?: Record<string, unknown>;
+  // Qwen3.6/3.8 thinking mode parameters
+  reasoningEffort?: ReasoningEffort;
+  preserveThinking?: boolean;
+}
+
+// ─── PI ProviderModelConfig (required by registerProvider) ─────────────────────
+interface FullModelConfig {
+  id: string;
+  name: string;
+  reasoning: boolean;
+  input: ("text" | "image")[];
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  contextWindow: number;
+  maxTokens: number;
 }
 
 interface ProviderConfig {
@@ -87,6 +126,21 @@ function loadModelsJson(): ModelsJson | null {
 
 function saveModelsJson(data: ModelsJson): void {
   fs.writeFileSync(MODELS_JSON, JSON.stringify(data, null, 2) + "\n");
+}
+
+// ─── Convert ModelEntry → FullModelConfig for registerProvider ────────────────
+
+function toFullConfig(entry: ModelEntry): FullModelConfig {
+  const spec = KNOWN_SPECS[entry.id];
+  return {
+    id: entry.id,
+    name: spec?.displayName ?? entry.id.replace(/[-_]/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
+    reasoning: entry.reasoning ?? false,
+    input: entry.input ?? ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, // Local = free
+    contextWindow: entry.contextWindow ?? 128000,
+    maxTokens: entry.maxTokens ?? 16384,
+  };
 }
 
 // ─── Fetch models from LM Studio ──────────────────────────────────────────────
@@ -162,6 +216,12 @@ async function runModelUpdate(ctx: Parameters<ExtensionAPI["registerCommand"]>[1
     const beforeCount = provider.models.length;
     provider.models = provider.models.filter((m) => serverModels.includes(m.id));
     const removed = beforeCount - provider.models.length;
+
+    // Fix compat: LM Studio API supports reasoning_effort (tested Aug 2026)
+    if (!provider.compat) {
+      provider.compat = {};
+    }
+    provider.compat.supportsReasoningEffort = true;
 
     saveModelsJson(data);
 
@@ -246,7 +306,12 @@ async function runModelConfig(
 
 function buildModelSummary(m: ModelEntry): string {
   const parts: string[] = [];
-  if (m.reasoning) parts.push("reasoning");
+  if (m.reasoning) {
+    const spec = KNOWN_SPECS[m.id];
+    const defaultEffort = spec?.reasoningEffortOptions?.[0] ?? "medium";
+    parts.push(`reasoning (${m.reasoningEffort ?? defaultEffort})`);
+    if (m.preserveThinking) parts.push("preserve-thinking");
+  }
   if (m.input?.includes("image")) parts.push("vision");
   if (m.contextWindow) parts.push(`${m.contextWindow / 1024}K ctx`);
   return parts.join(" • ");
@@ -264,16 +329,18 @@ async function showModelConfig(
   const originalContextWindow = model.contextWindow;
   let contextWindowChanged = false;
 
+  // Build settings list — include thinking params only for reasoning-capable models
+  const hasReasoning = model.reasoning ?? false;
   const settingsItems: SettingItem[] = [
     {
       id: "reasoning",
-      label: `Reasoning (thinking mode)`,
-      currentValue: String(model.reasoning ?? false),
+      label: `Thinking mode (enable_thinking)`,
+      currentValue: String(hasReasoning),
       values: ["true", "false"],
     },
     {
       id: "vision",
-      label: `Vision support`,
+      label: `Vision support (image input)`,
       currentValue: String(model.input?.includes("image") ?? false),
       values: ["true", "false"],
     },
@@ -290,6 +357,24 @@ async function showModelConfig(
       values: ["auto", "8192", "16384", "32768", "65536", "81920"],
     },
   ];
+
+  // Add thinking-mode-specific params for reasoning-capable models
+  if (hasReasoning) {
+    const spec = KNOWN_SPECS[model.id];
+    const effortOptions = spec?.reasoningEffortOptions ?? ["xhigh", "medium", "low"];
+    settingsItems.push({
+      id: "reasoningEffort",
+      label: `Reasoning effort (depth of thought)`,
+      currentValue: model.reasoningEffort ?? effortOptions[0],
+      values: effortOptions,
+    });
+    settingsItems.push({
+      id: "preserveThinking",
+      label: `Preserve thinking in history`,
+      currentValue: String(model.preserveThinking ?? false),
+      values: ["true", "false"],
+    });
+  }
 
   await ctx.ui.custom((_tui, theme, _kb, done) => {
     const container = new Container();
@@ -327,6 +412,12 @@ async function showModelConfig(
             } else {
               model.maxTokens = parseInt(newValue);
             }
+            break;
+          case "reasoningEffort":
+            model.reasoningEffort = newValue as ReasoningEffort;
+            break;
+          case "preserveThinking":
+            model.preserveThinking = newValue === "true";
             break;
         }
       },
@@ -389,7 +480,12 @@ async function showModelConfig(
   saveModelsJson(data);
 
   // Apply immediately mid-session via registerProvider (takes effect without reload)
-  pi.registerProvider(providerName, provider);
+  // Convert ModelEntry[] → FullModelConfig[] for PI's type requirements
+  const fullProvider = {
+    ...provider,
+    models: provider.models.map(toFullConfig),
+  };
+  pi.registerProvider(providerName, fullProvider);
   ctx.ui.notify(`Saved config for ${model.id}`, "info");
 
   // Trigger compaction if context window was changed and confirmed
@@ -401,9 +497,30 @@ async function showModelConfig(
   }
 }
 
+// ─── Auto-fix compat settings on load ────────────────────────────────────────
+
+function fixCompatSettings(): void {
+  const data = loadModelsJson();
+  if (!data) return;
+  let changed = false;
+  for (const provider of Object.values(data.providers)) {
+    if (provider.api === "openai-completions") {
+      // LM Studio API supports reasoning_effort — fix if wrong
+      if (provider.compat?.supportsReasoningEffort === false) {
+        provider.compat.supportsReasoningEffort = true;
+        changed = true;
+      }
+    }
+  }
+  if (changed) saveModelsJson(data);
+}
+
 // ─── Main Extension ──────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+  // Auto-fix compat settings on load
+  fixCompatSettings();
+
   pi.registerCommand("model-update", {
     description: "Query server for fresh model list and update models.json",
     handler: async (_args, ctx) => {
