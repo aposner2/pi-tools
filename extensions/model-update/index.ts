@@ -125,6 +125,9 @@ interface FullModelConfig {
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
   contextWindow: number;
   maxTokens: number;
+  // Declares which thinking levels this model supports. PI only offers
+  // xhigh/max if thinkingLevelMap[level] is defined (see getSupportedThinkingLevels).
+  thinkingLevelMap?: Record<string, string | null>;
 }
 
 interface ProviderConfig {
@@ -156,7 +159,7 @@ function saveModelsJson(data: ModelsJson): void {
 
 function toFullConfig(entry: ModelEntry): FullModelConfig {
   const spec = KNOWN_SPECS[entry.id];
-  return {
+  const config: FullModelConfig = {
     id: entry.id,
     name: spec?.displayName ?? entry.id.replace(/[-_]/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
     reasoning: entry.reasoning ?? false,
@@ -165,6 +168,20 @@ function toFullConfig(entry: ModelEntry): FullModelConfig {
     contextWindow: entry.contextWindow ?? 128000,
     maxTokens: entry.maxTokens ?? 16384,
   };
+
+  // Declare supported thinking levels so PI doesn't clamp xhigh.
+  // PI requires thinkingLevelMap[level] to be defined for xhigh/max to be
+  // available. Identity mapping: the level string is sent as-is as the
+  // reasoning_effort API param (openai-completions uses thinkingLevelMap[level] ?? level).
+  if (entry.reasoning && spec?.reasoningEffortOptions?.length) {
+    const map: Record<string, string | null> = {};
+    for (const opt of spec.reasoningEffortOptions) {
+      map[opt] = opt;
+    }
+    config.thinkingLevelMap = map;
+  }
+
+  return config;
 }
 
 // ─── Fetch models from LM Studio ──────────────────────────────────────────────
