@@ -184,6 +184,21 @@ function toFullConfig(entry: ModelEntry): FullModelConfig {
   return config;
 }
 
+// Register all providers from models.json with full config (including
+// thinkingLevelMap) so PI's model capabilities reflect per-model effort options.
+// Called on extension load (and after /reload) and after config saves.
+function registerAllProviders(pi: ExtensionAPI): void {
+  const data = loadModelsJson();
+  if (!data) return;
+  for (const [name, provider] of Object.entries(data.providers)) {
+    const fullProvider = {
+      ...provider,
+      models: provider.models.map(toFullConfig),
+    };
+    pi.registerProvider(name, fullProvider);
+  }
+}
+
 // ─── Fetch models from LM Studio ──────────────────────────────────────────────
 
 async function fetchServerModels(baseUrl: string, apiKey?: string): Promise<string[]> {
@@ -936,6 +951,10 @@ function fixCompatSettings(): void {
 export default function (pi: ExtensionAPI) {
   // Auto-fix compat settings on load
   fixCompatSettings();
+
+  // Register providers with full config (thinkingLevelMap) so PI offers the
+  // correct thinking levels (e.g. xhigh) instead of clamping them.
+  registerAllProviders(pi);
 
   // Sync PI's thinking level with per-model config on model change
   pi.on("model_select", async (event) => {
