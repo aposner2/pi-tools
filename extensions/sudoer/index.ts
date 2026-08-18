@@ -90,10 +90,22 @@ function getHostKey(): string {
 
 /** Extract the target host from commands like `ssh hostX "sudo ..."` or `sudo ssh hostX`. */
 function extractTargetHost(command: string): string | null {
-  const match = command.match(/\bssh\s+(?:-[a-zA-Z]+\s+)*(?:(?:-l\s+\S+\s+)?)?(?:\S+@)?(\S+)/);
+  // Only match actual SSH invocations — not references inside strings/comments.
+  // The ssh keyword must appear as a real command (preceded by start-of-string, pipe,
+  // semicolon, &&, ||, backslash-newline, or opening subshell).
+  const match = command.match(/(?:^|[;|&(]|\s+&&\s+|\s+||\s+|\\\n)\s*ssh\s+(?:-[a-zA-Z]+\s+)*(?:(?:-l\s+\S+\s+)?)?(?:\S+@)?(\S+)/);
   if (match) {
     const candidate = match[1].replace(/["']/g, "");
-    if (!candidate.startsWith("-") && !candidate.includes(":") || /^\d+\.\d+/.test(candidate)) {
+    // Reject obvious non-hosts: flags, paths, URLs with ports, code-like tokens
+    if (
+      !candidate.startsWith("-") &&
+      !candidate.includes(":") &&
+      !candidate.includes("(") &&
+      !candidate.includes(")") &&
+      !candidate.includes("{") &&
+      !candidate.includes("}") &&
+      candidate.length > 0
+    ) {
       return candidate;
     }
   }
@@ -191,9 +203,24 @@ async function executeSudoCommand(
   });
 }
 
-/** Verify a password by running `sudo -S -k echo ok` and piping the password via stdin. */
-async function verifyPassword(password: string): Promise<boolean> {
-  const result = await executeSudoCommand("sudo -S -k echo ok", password);
+/** Verify a password by running `sudo -S -k echo ok` and piping the password via stdin.
+ * For remote hosts, verifies over SSH so the correct host's sudo is checked. */
+async function verifyPassword(password: string, host?: string): Promise<boolean> {
+  const localHost = getHostKey();
+  let command: string;
+
+  if (host && host !== localHost) {
+    // Verify on the remote host via SSH — stdin is forwarded through to sudo -S.
+    // Requires key-based SSH auth (password-based SSH needs sshpass or similar).
+    const safeHost = /^[a-zA-Z0-9._-]+$/.test(host)
+      ? host
+      : `'${host.replace(/'/g, "'\\''")}'`;
+    command = `ssh ${safeHost} "sudo -S -k echo ok"`;
+  } else {
+    command = "sudo -S -k echo ok";
+  }
+
+  const result = await executeSudoCommand(command, password);
   return result.exitCode === 0 && (result.stdout + result.stderr).includes("ok");
 }
 
@@ -346,7 +373,7 @@ async function promptAndVerify(
     const password = await promptPassword(ctx, host);
     if (!password) return null; // user cancelled
 
-    if (await verifyPassword(password)) {
+    if (await verifyPassword(password, host)) {
       setCachedPassword(password, host);
       ctx.ui.setStatus("sudoer", ctx.ui.theme.fg("success", `sudoer authenticated (${host || getHostKey()})`));
       return password;
