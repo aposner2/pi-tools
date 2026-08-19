@@ -1,7 +1,8 @@
 {
   "theme": "dark",
   "defaultProvider": "lmstudio",
-  "defaultModel": "qwen3.6-27b-mtp",
+  "defaultModel": "qwen/qwen3.8-27b",
+  "defaultThinkingLevel": "xhigh",
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:pi-ask-user",
@@ -9,6 +10,5 @@
   ],
   "terminal": {
     "showTerminalProgress": true
-  },
-  "defaultThinkingLevel": "high"
+  }
 }

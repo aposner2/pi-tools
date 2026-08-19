@@ -6,11 +6,19 @@
       "apiKey": "sk-lm-5S9CVqE9:FJOjCrqv9BocSpOEPyP4",
       "compat": {
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false,
+        "supportsReasoningEffort": true,
         "maxTokensField": "max_tokens",
         "thinkingFormat": "qwen-chat-template"
       },
       "models": [
+        {
+          "id": "qwen/qwen3.8-27b",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 262144,
+          "maxTokens": 81920,
+          "reasoningEffort": "xhigh"
+        },
         {
           "id": "qwen3.6-27b-mtp",
           "reasoning": true,
@@ -19,30 +27,30 @@
           "maxTokens": 81920
         },
         {
-          "id": "qwen/qwen3.6-27b",
-          "reasoning": true
+          "id": "qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive",
+          "reasoning": false,
+          "input": ["text", "image"],
+          "contextWindow": 131072,
+          "maxTokens": 81920
         },
         {
-          "id": "qwen/qwen3.6-35b-a3b",
-          "reasoning": true
+          "id": "qwen2.5-vl-72b-instruct",
+          "input": ["text", "image"],
+          "contextWindow": 131072,
+          "maxTokens": 65536
         },
         {
-          "id": "qwen/qwen3-coder-next"
+          "id": "qwen/qwen3-coder-30b",
+          "contextWindow": 262144,
+          "maxTokens": 81920
         },
         {
-          "id": "qwen2.5-coder-32b-instruct"
+          "id": "devstral-small-2507",
+          "contextWindow": 131072,
+          "maxTokens": 65536
         },
         {
-          "id": "google/gemma-4-31b"
-        },
-        {
-          "id": "google/gemma-4-26b-a4b-qat"
-        },
-        {
-          "id": "google/gemma-4-12b-qat"
-        },
-        {
-          "id": "google/gemma-4-e4b"
+          "id": "prism-ml/bonsai-27b"
         }
       ]
     }
