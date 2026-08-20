@@ -2,5 +2,6 @@
 # Auto-run setup.sh after pi update --extensions
 # Installed by setup.sh — do not edit manually.
 
-SCRIPT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+# Hook lives at <clone>/.git/hooks/post-merge → repo root is two levels up.
+SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 bash "$SCRIPT_DIR/setup.sh" 2>&1 || true

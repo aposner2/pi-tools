@@ -1,0 +1,19 @@
+{
+  "machines": [
+    {
+      "hostname": "sparky",
+      "ip": "192.168.1.2",
+      "role": "compute-plane",
+      "onboarded": "2026-08-19",
+      "status": "unified"
+    },
+    {
+      "hostname": "agents",
+      "ip": "192.168.1.4",
+      "role": "state-plane",
+      "onboarded": "2026-08-19",
+      "status": "unified",
+      "last_verified": "2026-08-20"
+    }
+  ]
+}

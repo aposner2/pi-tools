@@ -17,21 +17,38 @@
           "input": ["text", "image"],
           "contextWindow": 262144,
           "maxTokens": 81920,
-          "reasoningEffort": "xhigh"
+          "reasoningEffort": "xhigh",
+          "thinkingLevelMap": {
+            "xhigh": "xhigh",
+            "medium": "medium",
+            "low": "low"
+          }
         },
         {
           "id": "qwen3.6-27b-mtp",
           "reasoning": true,
           "input": ["text", "image"],
           "contextWindow": 262144,
-          "maxTokens": 81920
+          "maxTokens": 81920,
+          "thinkingLevelMap": {
+            "xhigh": "xhigh",
+            "high": "high",
+            "medium": "medium",
+            "low": "low"
+          }
         },
         {
           "id": "qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive",
           "reasoning": false,
           "input": ["text", "image"],
           "contextWindow": 131072,
-          "maxTokens": 81920
+          "maxTokens": 81920,
+          "thinkingLevelMap": {
+            "xhigh": "xhigh",
+            "high": "high",
+            "medium": "medium",
+            "low": "low"
+          }
         },
         {
           "id": "qwen2.5-vl-72b-instruct",
