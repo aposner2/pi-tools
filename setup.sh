@@ -63,12 +63,26 @@ check_prereqs() {
     command -v "$cmd" >/dev/null 2>&1 || { error "required command missing: $cmd"; missing=1; }
   done
   if [ "$missing" -ne 0 ]; then exit 1; fi
-  if ! command -v pi >/dev/null 2>&1; then
-    error "pi CLI not found. Install pi first (Node.js required), then re-run setup.sh."
+  if ! locate_pi; then
+    error "pi CLI not found (tried PATH + ~/.npm-global/bin + ~/.nvm/versions/node/*/bin + /usr/local/bin)."
+    error "Install pi first (Node.js required), then re-run setup.sh."
     exit 1
   fi
   [ -d "$PI_DIR" ] || { error "pi agent dir not found: $PI_DIR (has pi been started once?)"; exit 1; }
   ok "prerequisites OK (pi, git, curl, python3)"
+}
+
+# pi may live in nvm/npm-global dirs that aren't on a non-login SSH PATH
+locate_pi() {
+  if command -v pi >/dev/null 2>&1; then return 0; fi
+  local c
+  for c in "$HOME/.npm-global/bin/pi" "$HOME"/.nvm/versions/node/*/bin/pi /usr/local/bin/pi; do
+    if [ -x "$c" ]; then
+      export PATH="$(dirname "$c"):$PATH"
+      return 0
+    fi
+  done
+  return 1
 }
 
 # ── Packages ──────────────────────────────────────────────────────
