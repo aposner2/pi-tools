@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# lab-status — unified-lab health view (WS3)
+#
+# Run from any lab machine (best from agents, the state plane):
+#   bash bin/lab-status            # shared services + every registered machine
+#   bash bin/lab-status --local    # shared services + this machine only
+#
+# Per-machine check = that machine's own `setup.sh --verify` (health, authed
+# MCP handshakes, REST with key, enforcement probe, drift) — local for self,
+# over ssh for the rest (hostname first, IP fallback with accept-new, since
+# hostname resolution is asymmetric across the lab).
+#
+# After green runs, last_verified is aggregated into config/machines.json and
+# committed+pushed (best effort).
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLONE="$(cd "$HERE/.." && pwd)"
+MACH="$CLONE/config/machines.json"
+HS="${HINDSIGHT_HOST:-192.168.1.4}"
+LM="${LM_HOST:-192.168.1.2}"
+BANK="${GLOBAL_BANK:-alex-ai-global}"
+LOCAL_ONLY=0
+[ "${1:-}" = "--local" ] && LOCAL_ONLY=1
+
+KEY=""
+[ -f "$CLONE/.secrets/hindsight.key" ] && KEY="$(cat "$CLONE/.secrets/hindsight.key")"
+[ -n "$KEY" ] || KEY="${HINDSIGHT_API_KEY:-}"
+
+if [ -t 1 ]; then G=$'\033[0;32m'; R=$'\033[0;31m'; C=$'\033[0;36m'; Y=$'\033[1;33m'; N=$'\033[0m'
+else G=""; R=""; C=""; Y=""; N=""; fi
+ok()   { echo -e " ${G}✓${N} $*"; }
+bad()  { echo -e " ${R}✗${N} $*"; }
+warn() { echo -e " ${Y}!${N} $*"; }
+
+echo -e "${C}unified-lab status${N} — $(date '+%Y-%m-%d %H:%M') — from $(hostname)"
+echo
+
+# ── Shared services (run once, from here) ────────────────────────────────────
+echo -e "${C}shared services${N}"
+HS_OK=0
+if curl -sf -m 8 "http://$HS:8888/health" 2>/dev/null | grep -q healthy; then
+  HS_OK=1
+  BADCODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' \
+    "http://$HS:8888/v1/default/banks/$BANK/memories/list?limit=1" \
+    -H 'Authorization: Bearer bad-key-000' 2>/dev/null)"
+  if [ "$BADCODE" = "401" ] || [ "$BADCODE" = "403" ]; then
+    ok "hindsight $HS:8888 — healthy, auth enforced (bad key → $BADCODE)"
+  else
+    warn "hindsight $HS:8888 — healthy, but auth NOT enforced (bad key → ${BADCODE:-000})"
+  fi
+  NMEM="$(curl -s -m 10 -H "Authorization: Bearer $KEY" \
+    "http://$HS:8888/v1/default/banks/$BANK/memories/list?limit=1" 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("total","?"))' 2>/dev/null || echo '?')"
+  ok "bank $BANK — $NMEM memories"
+else
+  bad "hindsight $HS:8888 — NOT reachable/healthy"
+fi
+NMODELS="$(curl -sf -m 8 "http://$LM:1234/v1/models" 2>/dev/null \
+  | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data",[])))' 2>/dev/null || echo 0)"
+if [ "${NMODELS:-0}" -gt 0 ] 2>/dev/null; then
+  ok "lmstudio $LM:1234 — serving $NMODELS models"
+else
+  bad "lmstudio $LM:1234 — not reachable"
+fi
+echo
+
+# ── Machines ─────────────────────────────────────────────────────────────────
+echo -e "${C}machines${N}"
+FAILS=0
+PASSED=()
+run_verify_local() { (cd "$CLONE" && bash setup.sh --verify 2>&1); }
+run_verify_remote() { # <host> <ip>   (ssh -n: keep stdin for the caller's loop)
+  timeout 150 ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$1" \
+    "bash $CLONE/setup.sh --verify" 2>&1
+  if [ $? -ne 0 ]; then
+    timeout 150 ssh -n -o BatchMode=yes -o ConnectTimeout=8 \
+      -o StrictHostKeyChecking=accept-new "$2" \
+      "bash $CLONE/setup.sh --verify" 2>&1
+  fi
+}
+
+while read -r host ip role; do
+  is_self=0
+  [ "$(hostname)" = "$host" ] && is_self=1
+  if [ "$is_self" = "1" ]; then
+    out="$(run_verify_local)"; rc=$?
+  elif [ "$LOCAL_ONLY" = "1" ]; then
+    echo " · $host ($ip, $role) — skipped (--local)"
+    continue
+  else
+    out="$(run_verify_remote "$host" "$ip")"; rc=$?
+  fi
+  if [ $rc -eq 0 ]; then
+    ok "$host ($ip, $role) — all checks passed"
+    PASSED+=("$host")
+  else
+    detail="$(printf '%s\n' "$out" | grep -E '\[!\]|check\(s\) failed' | head -4 | sed 's/^\s*//' | tr '\n' ' | ')"
+    bad "$host ($ip, $role) — FAILED: ${detail:-no output (ssh/timeout?)}"
+    FAILS=$((FAILS+1))
+  fi
+done < <(python3 -c '
+import json
+d = json.load(open("'"$MACH"'"))
+for m in d["machines"]:
+    print(m["hostname"], m["ip"], m.get("role", ""))
+')
+echo
+
+# ── Registry aggregation (best effort) ───────────────────────────────────────
+if [ "${#PASSED[@]}" -gt 0 ]; then
+  TODAY="$(date -u +%F)"  # UTC: lab clocks sit in different local zones
+  reg_out="$(python3 - "$MACH" "$TODAY" "${PASSED[@]}" <<'PY' 2>/dev/null || echo error
+import json, sys
+path, today, *hosts = sys.argv[1:]
+d = json.load(open(path))
+changed = False
+for m in d["machines"]:
+    if m["hostname"] in hosts and m.get("last_verified") != today:
+        m["last_verified"] = today
+        changed = True
+if changed:
+    with open(path, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+print("changed" if changed else "unchanged")
+PY
+)"
+  if [ "$reg_out" = "changed" ]; then
+    if git -C "$CLONE" add config/machines.json \
+       && git -C "$CLONE" commit -q -m "registry: lab-status verified $TODAY ($(IFS=,; echo "${PASSED[*]}"))"; then
+      if git -C "$CLONE" pull --rebase -q 2>/dev/null && git -C "$CLONE" push -q 2>/dev/null; then
+        ok "registry: last_verified updated + pushed ($TODAY)"
+      else
+        warn "registry: committed locally; push failed (reconciles on next run)"
+      fi
+    fi
+  elif [ "$reg_out" = "unchanged" ]; then
+    ok "registry already current ($TODAY)"
+  fi
+fi
+
+if [ "$FAILS" -eq 0 ] && [ "$HS_OK" = "1" ]; then
+  echo -e "${G}ALL GREEN${N}"
+else
+  echo -e "${R}FAILURES PRESENT${N} ($FAILS machine(s))"
+fi
+exit $FAILS
