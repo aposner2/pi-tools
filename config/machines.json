@@ -15,6 +15,13 @@
       "onboarded": "2026-08-19",
       "status": "unified",
       "last_verified": "2026-08-21"
+    },
+    {
+      "hostname": "atlas",
+      "ip": "192.168.1.3",
+      "role": "member",
+      "onboarded": "2026-08-21",
+      "status": "unified"
     }
   ]
 }
