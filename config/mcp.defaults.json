@@ -1,7 +1,10 @@
 {
   "mcpServers": {
     "hindsight": {
-      "url": "http://192.168.1.4:8888/mcp/alex-ai-global/"
+      "url": "http://192.168.1.4:8888/mcp/alex-ai-global/",
+      "headers": {
+        "Authorization": "Bearer {{HINDSIGHT_API_KEY}}"
+      }
     },
     "mcp-searxng": {
       "directTools": true,

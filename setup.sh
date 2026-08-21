@@ -137,12 +137,33 @@ maybe_backup() {
   fi
 }
 
-# Canonical file content with lab-host substitution applied (no-op when hosts are default)
+# Canonical file content with lab-host + secret injection applied
+# Secrets: env HINDSIGHT_API_KEY / LM_STUDIO_API_KEY, else $CLONE/.secrets/<name>.key
 stage_file() {
   local src="$1" out
   out="$(mktemp)"
-  sed -e "s|http://$DEF_HS:8888|http://$HINDSIGHT_HOST:8888|g" \
-      -e "s|http://$DEF_LM:1234|http://$LM_HOST:1234|g" "$src" > "$out"
+  python3 - "$src" "$out" "$HINDSIGHT_HOST" "$LM_HOST" "$CLONE" <<'PY'
+import os, sys
+src, out, hs, lm, clone = sys.argv[1:6]
+t = open(src).read()
+DHS, DLM = "192.168.1.4", "192.168.1.2"
+t = t.replace("http://%s:8888" % DHS, "http://%s:8888" % hs)
+t = t.replace("http://%s:1234" % DLM, "http://%s:1234" % lm)
+def getkey(name, envname):
+    v = os.environ.get(envname)
+    if v:
+        return v
+    p = os.path.join(clone, ".secrets", name + ".key")
+    if os.path.exists(p):
+        return open(p).read().strip()
+    return ""
+hs_key = getkey("hindsight", "HINDSIGHT_API_KEY")
+lm_key = getkey("lmstudio", "LM_STUDIO_API_KEY")
+t = t.replace("{{HINDSIGHT_API_KEY}}", hs_key).replace("{{LM_STUDIO_API_KEY}}", lm_key)
+open(out, "w").write(t)
+if not hs_key: print("WARN: hindsight key not found (.secrets/hindsight.key or HINDSIGHT_API_KEY) — deployed EMPTY", file=sys.stderr)
+if not lm_key: print("WARN: lmstudio key not found (.secrets/lmstudio.key or LM_STUDIO_API_KEY) — deployed EMPTY", file=sys.stderr)
+PY
   echo "$out"
 }
 
@@ -255,9 +276,10 @@ PY
 }
 
 # ── Verification ──────────────────────────────────────────────────
-mcp_handshake() { # <url>
-  local url="$1" resp
-  resp="$(curl -s -m 8 -X POST "$url" \
+mcp_handshake() { # <url> [bearer_key]
+  local url="$1" key="${2:-}" resp hdr=()
+  [ -n "$key" ] && hdr=(-H "Authorization: Bearer $key")
+  resp="$(curl -s -m 8 -X POST "${hdr[@]}" "$url" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"setup.sh","version":"2.0"}}}' \
@@ -265,8 +287,21 @@ mcp_handshake() { # <url>
   echo "$resp" | grep -q "serverInfo\|protocolVersion"
 }
 
+live_key() {
+  python3 -c '
+import os, re
+try:
+    t = open(os.path.expanduser("~/.hindsight/config")).read()
+    m = re.search(r"^api_key\s*=\s*\"?([^\"\n]+)\"?\s*$", t, re.M)
+    print(m.group(1) if m else "")
+except Exception:
+    print("")' 2>/dev/null || true
+}
+
 verify_all() {
-  local fails=0
+  local fails=0 KEY
+  KEY="$(live_key)"
+  [ -n "$KEY" ] || warn "no api_key found in ~/.hindsight/config (auth checks will be unauthenticated)"
   echo ""
   info "=== Verification checklist ($(hostname)) ==="
 
@@ -282,8 +317,8 @@ verify_all() {
     warn "LM Studio NOT reachable at $LM_HOST:1234"; fails=$((fails+1))
   fi
 
-  if mcp_handshake "http://$HINDSIGHT_HOST:8888/mcp/$GLOBAL_BANK/"; then
-    ok "MCP handshake OK: hindsight ($GLOBAL_BANK)"
+  if mcp_handshake "http://$HINDSIGHT_HOST:8888/mcp/$GLOBAL_BANK/" "$KEY"; then
+    ok "MCP handshake OK: hindsight ($GLOBAL_BANK)${KEY:+ [authed]}"
   else
     warn "MCP handshake FAILED: hindsight"; fails=$((fails+1))
   fi
@@ -294,6 +329,30 @@ verify_all() {
     warn "MCP handshake FAILED: mcp-searxng"; fails=$((fails+1))
   fi
 
+  # REST read with the live key (lightweight endpoint — recall hits the CPU TEI reranker and is slow)
+  local REST
+  REST="$(curl -s -m 15 -o /dev/null -w '%{http_code}' \
+    "http://$HINDSIGHT_HOST:8888/v1/default/banks/$GLOBAL_BANK/memories/list?limit=1" \
+    ${KEY:+-H "Authorization: Bearer $KEY"} 2>/dev/null)"
+  REST="${REST:-000}"
+  if [ "$REST" = "200" ]; then
+    ok "REST list-memories with key: 200 OK"
+  else
+    warn "REST list-memories returned HTTP $REST (expected 200)"; fails=$((fails+1))
+  fi
+
+  # Enforcement probe: a wrong key must be rejected (informational until the server is flipped on)
+  local BAD
+  BAD="$(curl -s -m 15 -o /dev/null -w '%{http_code}' \
+    "http://$HINDSIGHT_HOST:8888/v1/default/banks/$GLOBAL_BANK/memories/list?limit=1" \
+    -H 'Authorization: Bearer definitely-wrong-key-000' 2>/dev/null)"
+  BAD="${BAD:-000}"
+  if [ "$BAD" = "401" ] || [ "$BAD" = "403" ]; then
+    ok "auth enforcement: ON (bad key rejected with $BAD)"
+  else
+    info "auth enforcement: OFF (bad key got $BAD — server not enforcing yet)"
+  fi
+
   # Drift check: live configs vs canonical (host-substituted), settings ignores pi-managed field
   info "drift check (live vs canonical) ..."
   local drift
@@ -301,9 +360,14 @@ verify_all() {
 import json, os, sys
 clone, pidir, home, hs, lm = sys.argv[1:6]
 DHS, DLM = "192.168.1.4", "192.168.1.2"
+def getkey(name):
+    p = os.path.join(clone, ".secrets", name + ".key")
+    return open(p).read().strip() if os.path.exists(p) else ""
 def sub(t):
-    return (t.replace("http://%s:8888" % DHS, "http://%s:8888" % hs)
-             .replace("http://%s:1234" % DLM, "http://%s:1234" % lm))
+    t = (t.replace("http://%s:8888" % DHS, "http://%s:8888" % hs)
+           .replace("http://%s:1234" % DLM, "http://%s:1234" % lm))
+    return (t.replace("{{HINDSIGHT_API_KEY}}", getkey("hindsight"))
+             .replace("{{LM_STUDIO_API_KEY}}", getkey("lmstudio")))
 def canon_json(rel):
     return json.loads(sub(open(os.path.join(clone, rel)).read()))
 def live_json(rel):
