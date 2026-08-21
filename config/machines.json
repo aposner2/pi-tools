@@ -6,7 +6,7 @@
       "role": "compute-plane",
       "onboarded": "2026-08-19",
       "status": "unified",
-      "last_verified": "2026-08-20"
+      "last_verified": "2026-08-21"
     },
     {
       "hostname": "agents",
@@ -21,7 +21,8 @@
       "ip": "192.168.1.3",
       "role": "member",
       "onboarded": "2026-08-21",
-      "status": "unified"
+      "status": "unified",
+      "last_verified": "2026-08-21"
     }
   ]
 }
