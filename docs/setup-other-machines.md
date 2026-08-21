@@ -39,6 +39,8 @@ chmod +x setup.sh
 
 Where `HINDSIGHT_HOST` defaults to `192.168.1.4`. This handles steps 2–3 below automatically.
 
+> **API keys** — during onboarding, `setup.sh` checks for the Hindsight API key (required) and the LM Studio API key (optional). Keys resolve in order: `HINDSIGHT_API_KEY` / `LM_STUDIO_API_KEY` env vars → `<pi-tools clone>/.secrets/<name>.key` → **interactive prompt** (masked input; the Hindsight key is validated live against the API with up to 3 attempts; entered keys are persisted to the gitignored `.secrets/` directory, chmod 600). Env-provided keys are never written to disk. In a non-interactive run (no TTY) missing keys fail fast with the three supported ways to supply them. Use `--non-interactive` to force this behavior.
+
 ### Step 3 — Install pi-hindsight
 
 ```bash

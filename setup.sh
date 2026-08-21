@@ -4,20 +4,28 @@
 # Usage:
 #   bash setup.sh [HINDSIGHT_HOST]             full onboarding (idempotent — safe to re-run)
 #   bash setup.sh --verify [HINDSIGHT_HOST]    verify + drift check only (makes NO changes)
+#   bash setup.sh --non-interactive ...        never prompt; fail fast if keys are missing
 #   HINDSIGHT_HOST defaults to 192.168.1.4
 #   Env overrides: LM_HOST (default 192.168.1.2), GLOBAL_BANK (default alex-ai-global)
+#
+# API keys (hindsight: required, lmstudio: optional):
+#   Resolution order per key: env (HINDSIGHT_API_KEY / LM_STUDIO_API_KEY) ->
+#   <clone>/.secrets/<name>.key -> interactive prompt (tty only). Prompt-entered
+#   keys are validated live (hindsight) and persisted to .secrets/ (chmod 600).
+#   Env-provided keys are never persisted. Non-interactive runs with missing
+#   keys fail with explicit guidance instead of deploying empty keys.
 #
 # Full mode:
 #   1. Installs pi packages: pi-tools (git) + pi-hindsight (npm)
 #   2. Syncs the active pi-tools clone to latest (installs the post-merge hook)
-#   3. Deploys the 5 canonical artifacts (backing up anything that differs first):
+#   3. Ensures API keys are available (env / .secrets / interactive prompt)
 #        ~/.pi/agent/APPEND_SYSTEM.md  -> symlink into the clone (single source of truth)
 #        ~/.pi/agent/mcp.json          <- config/mcp.defaults.json
 #        ~/.pi/agent/settings.json     <- config/settings.defaults.json (keeps pi-managed fields)
 #        ~/.pi/agent/models.json       <- config/models.schema.json
 #        ~/.hindsight/config           <- config/hindsight.config
-#   4. Records this machine in config/machines.json (lab registry)
-#   5. Runs the verification checklist (health + MCP handshakes + drift)
+#   5. Records this machine in config/machines.json (lab registry)
+#   6. Runs the verification checklist (health + MCP handshakes + drift)
 #
 # Escape hatches:
 #   - A lock file at $PI_DIR/.pi-lock/<name>.lock skips a file (user customization preserved)
@@ -28,10 +36,12 @@ set -euo pipefail
 
 # ── Arguments ─────────────────────────────────────────────────────
 VERIFY_ONLY=0
+NON_INTERACTIVE=0
 POSITIONAL=()
 for a in "$@"; do
   case "$a" in
     --verify) VERIFY_ONLY=1 ;;
+    --non-interactive) NON_INTERACTIVE=1 ;;
     *) POSITIONAL+=("$a") ;;
   esac
 done
@@ -244,6 +254,95 @@ deploy_hindsight_config() {
 }
 
 
+# ── API keys ──────────────────────────────────────────────────────
+# Resolution order per key: env var -> .secrets/<name>.key -> interactive prompt.
+# Prompt-entered keys are validated (hindsight) and persisted to .secrets/.
+
+interactive_tty() { ( : </dev/tty ) >/dev/null 2>&1; }
+
+ask_key() { # $1=label — masked input from /dev/tty (stdin may be the script under `curl | bash -s`)
+  # Label + newline go to stderr (the pty); only the key goes to stdout (the caller's $(...) capture).
+  local val=""
+  printf '%s ' "$1" >&2
+  if read -rs val </dev/tty 2>/dev/null; then
+    printf '%s' "$val"
+  fi
+  echo >&2
+}
+
+hindsight_key_valid() { # $1=key — live check against the API (200 = accepted)
+  local code
+  code="$(curl -s -m 10 -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $1" \
+    "http://$HINDSIGHT_HOST:8888/v1/default/banks/$GLOBAL_BANK/memories/list?limit=1" 2>/dev/null)"
+  [ "$code" = "200" ]
+}
+
+persist_key() { # $1=name $2=value
+  printf '%s' "$2" > "$CLONE/.secrets/$1.key"
+  chmod 600 "$CLONE/.secrets/$1.key"
+  ok "key '$1' saved to .secrets/$1.key (gitignored, chmod 600)"
+}
+
+ensure_keys() {
+  mkdir -p "$CLONE/.secrets"
+  chmod 700 "$CLONE/.secrets" 2>/dev/null || true
+
+  local need_hindsight=0 need_lm=0
+  [ -n "${HINDSIGHT_API_KEY:-}" ] || [ -s "$CLONE/.secrets/hindsight.key" ] || need_hindsight=1
+  [ -n "${LM_STUDIO_API_KEY:-}" ]   || [ -s "$CLONE/.secrets/lmstudio.key" ]   || need_lm=1
+
+  if [ "$need_hindsight" = 0 ] && [ "$need_lm" = 0 ]; then
+    ok "API keys available (env or .secrets) — no prompt needed"
+    return 0
+  fi
+
+  local missing=""
+  [ "$need_hindsight" = 1 ] && missing="$missing hindsight (required)"
+  [ "$need_lm" = 1 ] && missing="$missing lmstudio (optional)"
+
+  if [ "$NON_INTERACTIVE" = 1 ] || ! interactive_tty; then
+    error "API key(s) missing:$missing"
+    error "this run is non-interactive. Supply keys one of these ways and re-run:"
+    error "  1) env:  HINDSIGHT_API_KEY=<key> [LM_STUDIO_API_KEY=<key>] bash setup.sh $HINDSIGHT_HOST"
+    error "  2) file: printf %s <key> | tee $CLONE/.secrets/hindsight.key && chmod 600 $CLONE/.secrets/hindsight.key"
+    error "  3) tty:  run setup.sh from an interactive terminal to be prompted"
+    exit 1
+  fi
+
+  warn "API key(s) missing:$missing"
+  info  "Input is masked. Optional keys can be skipped with Enter."
+  info  "Keys entered here are saved to $CLONE/.secrets/ (gitignored, chmod 600)."
+  echo ""
+
+  if [ "$need_hindsight" = 1 ]; then
+    local i key hs_done=0
+    for i in 1 2 3; do
+      key="$(ask_key "Hindsight API key (attempt $i/3)")"
+      if [ -n "$key" ] && hindsight_key_valid "$key"; then
+        persist_key hindsight "$key"
+        hs_done=1
+        break
+      fi
+      warn "$([ -n "$key" ] && echo 'key rejected by' || echo 'empty input —') ${HINDSIGHT_HOST}:8888 — try again"
+    done
+    if [ "$hs_done" != 1 ]; then
+      error "could not obtain/validate a Hindsight API key (required) — aborting"
+      exit 1
+    fi
+  fi
+
+  if [ "$need_lm" = 1 ]; then
+    local lk
+    lk="$(ask_key "LM Studio API key (optional — Enter to skip)")"
+    if [ -n "$lk" ]; then
+      persist_key lmstudio "$lk"
+    else
+      warn "lmstudio key skipped — deploys empty (OK: server currently does not enforce auth)"
+    fi
+  fi
+}
+
 # ── Registry ──────────────────────────────────────────────────────
 register_machine() {
   local reg="$CLONE/config/machines.json"
@@ -438,6 +537,10 @@ main() {
   sync_clone
 
   echo ""
+  info "checking API keys ..."
+  ensure_keys
+
+  echo ""
   info "deploying canonical artifacts ..."
   deploy_append
   local staged
@@ -458,4 +561,7 @@ main() {
   info "Re-run any time with:  bash setup.sh --verify   (no changes, checks only)"
 }
 
-main "$@"
+# Run main only when executed (sourcing imports the functions for testing)
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

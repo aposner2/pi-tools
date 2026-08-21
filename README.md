@@ -101,7 +101,7 @@ All config files use **hardcoded LAN IPs** — no `.env.local` or template varia
 |------|---------|------------|
 | `settings.defaults.json` | Theme, provider, model, packages | `lmstudio`, `qwen3.6-27b-mtp` |
 | `models.schema.json` | Provider definitions | LM Studio at `192.168.1.2:1234/v1` |
-| `mcp.defaults.json` | MCP servers | hindsight → `192.168.1.4:8888`, searxng → `192.168.1.3:4005` |
+| `mcp.defaults.json` | MCP servers | hindsight → `192.168.1.4:8888`, searxng → `192.168.1.4:4005` |
 
 ### Setup Script (`setup.sh`)
 
@@ -109,6 +109,7 @@ All config files use **hardcoded LAN IPs** — no `.env.local` or template varia
 - **Skips locked files** — shows lock metadata and preserves current state
 - Installs git hook for auto-setup after `pi update --extensions`
 - Idempotent — safe to re-run after updates
+- **API keys** — resolves `HINDSIGHT_API_KEY` (required) / `LM_STUDIO_API_KEY` (optional) in order: env var → `.secrets/<name>.key` → interactive prompt. Prompt-entered keys are masked, validated live against the Hindsight API, and persisted to the gitignored `.secrets/` dir (chmod 600); env-provided keys are never persisted. Without a TTY the script fails fast with guidance (force this with `--non-interactive`).
 
 ### pi-config CLI Tool (`bin/pi-config`)
 
