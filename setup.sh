@@ -76,7 +76,7 @@ check_prereqs() {
 locate_pi() {
   if command -v pi >/dev/null 2>&1; then return 0; fi
   local c
-  for c in "$HOME/.npm-global/bin/pi" "$HOME"/.nvm/versions/node/*/bin/pi /usr/local/bin/pi; do
+  for c in "$HOME/.npm-global/bin/pi" "$HOME/.local/bin/pi" "$HOME"/.nvm/versions/node/*/bin/pi /usr/local/bin/pi; do
     if [ -x "$c" ]; then
       export PATH="$(dirname "$c"):$PATH"
       return 0

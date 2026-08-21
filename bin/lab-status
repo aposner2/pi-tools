@@ -70,13 +70,13 @@ echo -e "${C}machines${N}"
 FAILS=0
 PASSED=()
 run_verify_local() { (cd "$CLONE" && bash setup.sh --verify 2>&1); }
+# accept-new: trusted lab LAN — auto-approve a machine's FIRST host key, but never
+# silently re-key an existing one. Self-heals the hostname/IP key asymmetries.
+SSH_OPTS="-n -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
 run_verify_remote() { # <host> <ip>   (ssh -n: keep stdin for the caller's loop)
-  timeout 150 ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$1" \
-    "bash $CLONE/setup.sh --verify" 2>&1
+  timeout 150 ssh $SSH_OPTS "$1" "bash $CLONE/setup.sh --verify" 2>&1
   if [ $? -ne 0 ]; then
-    timeout 150 ssh -n -o BatchMode=yes -o ConnectTimeout=8 \
-      -o StrictHostKeyChecking=accept-new "$2" \
-      "bash $CLONE/setup.sh --verify" 2>&1
+    timeout 150 ssh $SSH_OPTS "$2" "bash $CLONE/setup.sh --verify" 2>&1
   fi
 }
 
